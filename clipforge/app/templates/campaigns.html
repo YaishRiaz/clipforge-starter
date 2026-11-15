@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% block body %}
+<h1>Campaigns</h1>
+{% if not rows %}<div class="card mute">No campaigns saved.</div>{% else %}
+<div class="card scroll"><table>
+<tr><th>Campaign</th><th>Status</th><th>Rate</th><th>Budget left</th><th>Deadline</th><th>Views</th><th>Earned (est.)</th><th>Approval</th></tr>
+{% for k in rows %}<tr><td><a href="/campaigns/{{ k.id }}" style="color:var(--accent)">{{ k.name }}</a><div class="mute">{{ k.platform }}</div></td><td>{{ k.status }}</td>
+<td>{{ '$%.2f/1K'|format(k.rate_per_1k) if k.rate_per_1k else '-' }}</td>
+<td>{{ '$%.0f'|format(k.budget_left) if k.budget_left is not none else '-' }}</td>
+<td>{{ k.deadline or '-' }}</td><td>{{ '{:,}'.format(k.views) }}</td><td>${{ '%.2f'|format(k.earned) }}</td>
+<td>{{ '%.0f%%'|format(k.approval * 100) if k.approval is not none else '-' }}</td></tr>{% endfor %}
+</table></div>{% endif %}
+<a class="btn" href="/discover">Find campaigns</a>
+{% endblock %}

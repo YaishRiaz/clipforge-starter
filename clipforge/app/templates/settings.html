@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block body %}
+<h1>Settings</h1>
+<div class="card"><form method="post" action="/settings">
+<label for="m">Mode</label>
+<select id="m" name="review_mode">
+<option value="review" {{ 'selected' if values.review_mode == 'review' }}>Review: I approve every clip</option>
+<option value="auto" {{ 'selected' if values.review_mode == 'auto' }}>Auto: post clips above the score threshold</option>
+</select>
+<label for="a">Auto-mode score threshold (0-100)</label><input id="a" name="auto_threshold" value="{{ values.auto_threshold }}">
+<label for="c">Posts per day (1-8)</label><input id="c" name="daily_cap" value="{{ values.daily_cap }}">
+<label for="t">Posting times, comma separated</label><input id="t" name="post_times" value="{{ values.post_times }}">
+<label for="l">LKR per USD (for the estimate display)</label><input id="l" name="lkr_per_usd" value="{{ values.lkr_per_usd }}">
+<div class="row"><button>Save</button></div>
+</form>
+<p class="mute">Nothing posts yet; these are read by the publishing phase. Disk floor: {{ disk_floor }} GB (set in .env).</p></div>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}{% block body %}
+<h1>Overview</h1>
+{% if waiting %}<div class="card"><a href="/ready" class="btn">{{ waiting }} clip{{ 's' if waiting != 1 }} waiting for review</a></div>{% endif %}
+<div class="card"><h2 style="margin-top:0;font-size:1.05rem">Runway</h2>
+<p><span class="big">{{ runway.ready }}</span> clip{{ 's' if runway.ready != 1 }} on hand ({{ runway.approved }} approved), {{ runway.cap }} posts a day.
+{% if runway.date %}<br>{{ runway.days }} day{{ 's' if runway.days != 1 }} to {{ runway.date }} = {{ runway.slots }} slots.
+{% if runway.short %}<span class="warn">{{ runway.short }} more clip{{ 's' if runway.short != 1 }} needed.</span>{% else %}<span class="ok">Covered.</span>{% endif %}{% endif %}</p>
+<div class="row" style="align-items:center">
+<form method="post" action="/autopilot"><input type="hidden" name="mode" value="{{ 'off' if autopilot_on else 'on' }}"><button class="ghost">Autopilot: {{ 'on' if autopilot_on else 'off' }} (switch {{ 'off' if autopilot_on else 'on' }})</button></form>
+<form method="post" action="/autopilot"><input type="hidden" name="mode" value="run"><button class="ghost">Run now</button></form>
+<form method="post" action="/warmup" style="display:flex;gap:.4rem"><input name="warmup_date" value="{{ runway.date or '' }}" placeholder="2026-11-19" style="width:9rem"><button class="ghost">Set date</button></form>
+</div></div>
+<div class="grid">
+<div class="card"><div class="mute">Views today</div><div class="big">{{ '{:,}'.format(ov.views_today) }}</div></div>
+<div class="card"><div class="mute">Views 7 days</div><div class="big">{{ '{:,}'.format(ov.views_7d) }}</div></div>
+<div class="card"><div class="mute">Views 30 days</div><div class="big">{{ '{:,}'.format(ov.views_30d) }}</div></div>
+<div class="card"><div class="mute">Clips posted</div><div class="big">{{ ov.posted }}</div></div>
+<div class="card"><div class="mute">Approval rate</div><div class="big">{{ '%.0f%%'|format(ov.approval_rate * 100) if ov.approval_rate is not none else '-' }}</div></div>
+</div>
+<div class="card"><h2 style="margin-top:0;font-size:1.05rem">Earnings</h2>
+<table>
+<tr><th></th><th>USD</th><th>LKR (about)</th></tr>
+<tr><td>Estimated, approved clips</td><td>${{ '%.2f'|format(ov.approved_usd) }}</td><td>{{ '{:,.0f}'.format(ov.approved_usd * ov.lkr_per_usd) }}</td></tr>
+<tr><td>Estimated, still pending</td><td>${{ '%.2f'|format(ov.pending_usd) }}</td><td>{{ '{:,.0f}'.format(ov.pending_usd * ov.lkr_per_usd) }}</td></tr>
+<tr><td>Actual, recorded payouts</td><td>${{ '%.2f'|format(ov.actual_usd) }}</td><td>{{ '{:,.0f}'.format(ov.actual_usd * ov.lkr_per_usd) }}</td></tr>
+</table>
+<p class="mute">Estimates are views x rate, capped per clip, zero under the campaign's minimum views. The LKR rate is set on the Settings page.</p></div>
+<div class="card"><h2 style="margin-top:0;font-size:1.05rem">Top clips</h2>
+{% if ov.top %}<div class="scroll"><table>{% for p in ov.top %}<tr><td>Clip {{ p.clip_id }}</td><td>{{ '{:,}'.format(p.views) }} views</td><td><a href="{{ p.url }}" style="color:var(--accent)">{{ p.url }}</a></td></tr>{% endfor %}</table></div>
+{% else %}<p class="mute">Nothing posted yet.</p>{% endif %}</div>
+{% endblock %}

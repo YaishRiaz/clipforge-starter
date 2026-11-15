@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block body %}
+<h1>Queue</h1>
+<div class="card">{% for s in ['queued','running','done','failed'] %}<span class="tag {{ 'bad' if s == 'failed' and counts.get(s) else '' }}">{{ s }} {{ counts.get(s, 0) }}</span> {% endfor %}</div>
+<div class="card scroll"><table>
+<tr><th>#</th><th>Job</th><th>Ref</th><th>Status</th><th>Last stage</th><th>Error</th><th></th></tr>
+{% for j in jobs %}<tr><td>{{ j.id }}</td><td>{{ j.type }}</td><td>{{ j.ref_id or '' }}</td>
+<td class="{{ 'bad' if j.status == 'failed' else ('ok' if j.status == 'done' else '') }}">{{ j.status }}</td>
+<td>{{ j.stage or '' }}</td><td class="mute">{{ (j.last_error or '')[:160] }}</td>
+<td>{% if j.status == 'failed' %}<form method="post" action="/job/{{ j.id }}/retry"><button class="ghost">Retry</button></form>{% endif %}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

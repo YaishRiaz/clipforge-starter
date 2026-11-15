@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block body %}
+<h1>Posted</h1>
+{% if not posts %}<div class="card mute">Nothing posted yet. Approved clips go out at the posting times set under Settings.</div>{% else %}
+<div class="card scroll"><table>
+<tr><th>Clip</th><th>Campaign</th><th>Link</th><th>Views</th><th>Submitted</th><th>Review</th><th>Est. USD</th></tr>
+{% for p in posts %}<tr><td>{{ p.clip_id }}</td><td>{{ p.campaign }}</td>
+<td>{% if p.url %}<a style="color:var(--accent)" href="{{ p.url }}">open</a>{% endif %}</td>
+<td>{{ '{:,}'.format(p.views) }}</td>
+<td>{% if p.submitted_at %}{{ p.submitted_at }}{% else %}<form method="post" action="/post/{{ p.id }}/submitted"><button class="ghost">Mark submitted</button></form>{% endif %}</td>
+<td>{{ p.campaign_review_status }}</td><td>${{ '%.2f'|format(p.estimate) }}</td></tr>{% endfor %}
+</table></div>{% endif %}
+{% endblock %}

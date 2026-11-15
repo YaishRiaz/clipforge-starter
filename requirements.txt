@@ -1,0 +1,30 @@
+# Phase 0 (core, queue, worker, benchmark encode) needs only the standard library.
+
+# tests
+pytest>=8
+
+# worker priority on Windows, RAM and temperature readings
+psutil>=5.9
+
+# Phase 1+: LLM and HTTP
+anthropic>=0.40
+httpx>=0.27
+
+# Phase 1: downloading the approved source footage a brief names
+yt-dlp>=2025.1.15
+
+# Phase 2: local transcription (CPU, int8)
+faster-whisper>=1.0
+# PyAV 19 removed av.open(metadata_errors=...), which faster-whisper 1.2 still calls.
+# Measured on this laptop 12 Nov 2026: av 19.0.2 raises TypeError in decode_audio.
+av>=14,<19
+
+# Phase 3: face detection for reframing
+opencv-python-headless>=4.9
+numpy>=1.26
+
+# Phase 4: dashboard
+fastapi>=0.110
+uvicorn>=0.29
+jinja2>=3.1
+python-multipart>=0.0.9

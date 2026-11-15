@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block body %}
+<h1>Edit clip {{ row.id }}</h1>
+<div class="card">
+<form method="post" action="/clip/{{ row.id }}/edit">
+<label for="t">Title (max {{ title_max }})</label>
+<input id="t" name="title" maxlength="{{ title_max }}" value="{{ meta.title }}">
+<label for="d">Description</label>
+<textarea id="d" name="description" rows="7">{{ meta.description }}</textarea>
+<p class="mute">The campaign's required handle, hashtags and mentions must stay in the text; a change that removes them is refused.</p>
+<div class="row"><button>Save</button><a class="btn ghost" href="/ready">Cancel</a></div>
+</form></div>
+{% endblock %}

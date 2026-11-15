@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ClipForge</title>
+<style>
+:root{--bg:#0f1115;--card:#181b22;--line:#2a2f3a;--text:#e8eaf0;--mute:#8d94a5;--ok:#3ecf8e;--warn:#f5b84b;--bad:#ef6a6a;--accent:#6aa8ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,sans-serif}
+nav{display:flex;gap:.25rem;overflow-x:auto;padding:.6rem 1rem;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg)}
+nav a{color:var(--mute);text-decoration:none;padding:.35rem .7rem;border-radius:.5rem;white-space:nowrap}
+nav a.on{background:var(--card);color:var(--text)}
+main{max-width:980px;margin:0 auto;padding:1rem}
+h1{font-size:1.3rem;margin:.2rem 0 1rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:.8rem;padding:1rem;margin-bottom:1rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.75rem}
+.big{font-size:1.5rem;font-weight:600}.mute{color:var(--mute)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.45rem .4rem;border-bottom:1px solid var(--line);vertical-align:top}
+.scroll{overflow-x:auto}
+button,.btn{background:var(--accent);color:#04101f;border:0;border-radius:.5rem;padding:.5rem .9rem;font:inherit;font-weight:600;cursor:pointer;text-decoration:none;display:inline-block}
+button.ghost,.btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+button.good{background:var(--ok)}button.danger{background:var(--bad)}
+input,select,textarea{width:100%;background:#0f1115;color:var(--text);border:1px solid var(--line);border-radius:.5rem;padding:.55rem;font:inherit}
+label{display:block;margin:.6rem 0 .2rem;color:var(--mute)}
+.flash{background:#1d2a3d;border:1px solid #2d4a73;padding:.6rem .9rem;border-radius:.6rem;margin-bottom:1rem}
+.clip{display:grid;grid-template-columns:minmax(0,260px) 1fr;gap:1rem}
+@media(max-width:640px){.clip{grid-template-columns:1fr}}
+video{width:100%;border-radius:.6rem;background:#000;max-height:70vh}
+.row{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.7rem}.row form{margin:0}
+.tag{display:inline-block;padding:.1rem .5rem;border-radius:1rem;border:1px solid var(--line);font-size:.8rem}
+</style></head><body>
+{% if path != '/login' %}
+<nav>
+{% for href,name in [('/','Overview'),('/ready','Ready'),('/posted','Posted'),('/discover','Find'),('/campaigns','Campaigns'),('/queue','Queue'),('/learn','Learn'),('/settings','Settings')] %}
+<a href="{{ href }}" class="{{ 'on' if path == href else '' }}">{{ name }}</a>
+{% endfor %}
+<form method="post" action="/logout" style="margin-left:auto"><button class="ghost" style="padding:.3rem .7rem">Log out</button></form>
+</nav>
+{% endif %}
+<main>
+{% if flash %}<div class="flash">{{ flash }}</div>{% endif %}
+{% block body %}{% endblock %}
+</main></body></html>

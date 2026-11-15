@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block body %}
+<h1>Join: {{ d.title }}</h1>
+<div class="card">
+<p>{{ d.brand }} on {{ d.source }}. {% if d.rate_max %}${{ '%g'|format(d.rate_max) }} per 1K views.{% endif %}</p>
+<ol>
+<li>Open the campaign and join it with your own account. ClipForge never clicks join for you.</li>
+<li>Copy the brief (the rules and the approved footage). A Google Doc link works if anyone with the link can view it; otherwise paste the text.</li>
+<li>Come back here and press "I joined it".</li></ol>
+<div class="row"><a class="btn" href="{{ d.url }}" target="_blank" rel="noopener noreferrer">Open to join</a></div>
+</div>
+<form method="post" action="/discover/{{ d.id }}/joined" class="card">
+<label>Brief (pasted text or a Google Doc link; can be added later)</label>
+<textarea name="brief" rows="8"></textarea>
+<p class="mute">Clipping starts only from this moment on, and only from footage the brief approves.</p>
+<div class="row"><button class="good">I joined it</button><a class="btn ghost" href="/discover">Back</a></div>
+</form>
+{% endblock %}

@@ -1,0 +1,43 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# working data, never committed
+data/
+out/*
+!out/.gitkeep
+inbox/own/*
+!inbox/own/.gitkeep
+*.db
+*.db-wal
+*.db-shm
+
+out/
+
+# never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+client_secret*.json
+token*.json
+data/
+inbox/own/*
+!inbox/own/.gitkeep
+inbox/*/
+assets/logos/*
+!assets/logos/.gitkeep
+
+# never commit these
+.env.*
+!.env.example
+*.pem
+*.key
+client_secret*.json
+token*.json
+inbox/*/
+assets/logos/*
+!assets/logos/.gitkeep

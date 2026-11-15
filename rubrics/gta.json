@@ -1,0 +1,100 @@
+{
+  "name": "gta",
+  "version": 2,
+  "note": "Weights for types seen in titles come from median views of 150 top GTA Shorts (YouTube Data API, 13 Nov 2026); a type with fewer than 5 matches keeps its earlier weight, and setup_payoff/stakes_early are hand-set. Views favour big channels, so treat this as a prior and re-weight from our own clips' views.",
+  "evidence": {
+    "big_reaction": {
+      "n": 10,
+      "median_views": 7767606
+    },
+    "funny_dialogue": {
+      "n": 30,
+      "median_views": 6052656
+    },
+    "heist_fail": {
+      "n": 26,
+      "median_views": 4222990
+    },
+    "npc_or_roleplay_chaos": {
+      "n": 26,
+      "median_views": 3095479
+    },
+    "physics_glitch": {
+      "n": 17,
+      "median_views": 4287295
+    },
+    "police_chase": {
+      "n": 24,
+      "median_views": 3922512
+    }
+  },
+  "categories": [
+    {
+      "id": "police_chase",
+      "weight": 0.9,
+      "description": "A pursuit, escape or shootout with police, with the outcome visible."
+    },
+    {
+      "id": "heist_fail",
+      "weight": 0.93,
+      "description": "A robbery, scam or plan that goes wrong in a way the viewer can follow."
+    },
+    {
+      "id": "betrayal_or_theft",
+      "weight": 1.0,
+      "description": "Someone steals from, tricks or turns on another character."
+    },
+    {
+      "id": "npc_or_roleplay_chaos",
+      "weight": 0.84,
+      "description": "Absurd character interaction: an argument, a bit that escalates, a stranger who will not play along."
+    },
+    {
+      "id": "physics_glitch",
+      "weight": 0.93,
+      "description": "A crash, ragdoll, stunt or game glitch that looks absurd."
+    },
+    {
+      "id": "funny_dialogue",
+      "weight": 1.07,
+      "description": "A line or exchange that is funny without needing the rest of the stream."
+    },
+    {
+      "id": "big_reaction",
+      "weight": 1.2,
+      "description": "A loud or visible reaction: shouting, laughter, disbelief."
+    },
+    {
+      "id": "setup_payoff",
+      "weight": 1.0,
+      "description": "A clear setup followed by a payoff inside the clip."
+    },
+    {
+      "id": "stakes_early",
+      "weight": 1.1,
+      "description": "What is at risk is stated or visible in the first three seconds."
+    }
+  ],
+  "penalties": [
+    {
+      "id": "needs_context",
+      "weight": -1.0,
+      "description": "Makes no sense without the rest of the stream, or depends on a long running storyline."
+    },
+    {
+      "id": "slow_start",
+      "weight": -0.8,
+      "description": "Nothing happens in the first three seconds."
+    },
+    {
+      "id": "no_payoff",
+      "weight": -1.0,
+      "description": "Ends before the moment resolves."
+    },
+    {
+      "id": "other_streamers_focus",
+      "weight": -1.0,
+      "description": "The moment is mostly about another streamer, which the brief bans."
+    }
+  ]
+}
