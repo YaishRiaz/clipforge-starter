@@ -96,7 +96,7 @@ def test_a_trailing_sliver_chunk_is_dropped(tmp_path):
     src = fake_audio(tmp_path / "in.m4a", 20)
     chunks = transcribe.prepare_chunks(src, tmp_path / "work", chunk_seconds=10)
     assert len(chunks) == 2
-    assert list((tmp_path / "work").glob("chunk*.flac")) == [p for p, _ in chunks]
+    assert sorted((tmp_path / "work").glob("chunk*.flac")) == [p for p, _ in chunks]   # listing order is the OS's
 
 
 def test_audio_shorter_than_the_floor_is_refused(tmp_path):

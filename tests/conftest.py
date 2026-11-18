@@ -35,6 +35,9 @@ def isolate_settings(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("CLIPFORGE_HOME", str(home))
     for name in MANAGED:
         monkeypatch.delenv(name, raising=False)
+    # The free-disk floor protects a real install; a test machine (a CI runner has about
+    # 14 GB free) must not fail for lack of space it never uses. The floor's own test sets it.
+    monkeypatch.setenv("DISK_FLOOR_GB", "0")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
