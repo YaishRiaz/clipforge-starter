@@ -1,0 +1,9 @@
+# Every change needs the maintainer's review before it can merge.
+* @YaishRiaz
+
+# Extra care: CI, licences and the responsible-use rules.
+/.github/ @YaishRiaz
+/LICENSE @YaishRiaz
+/THIRD_PARTY_NOTICES.md @YaishRiaz
+/clipforge/ingest/rules.py @YaishRiaz
+/clipforge/edit/compliance.py @YaishRiaz
