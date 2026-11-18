@@ -97,6 +97,38 @@ def test_logged_in_user_sees_every_page(client):
     assert "A title" in client.get("/ready").text
 
 
+def test_queue_page_names_the_clip_and_hides_the_autopilot_noise(client, env):
+    from clipforge.core import queue as queue_mod
+
+    conn = env[1]
+    queue_mod.enqueue(conn, "autopilot", dedupe=False)
+    queue_mod.enqueue(conn, "make_clip", ref_id=1, dedupe=False)
+    login(client)
+    r = client.get("/queue")
+    assert "Camp: hook" in r.text and "Making clip" in r.text
+    assert "autopilot" not in r.text.lower()
+
+
+def test_the_campaigns_list_also_offers_leave_and_rejoin(client, env):
+    login(client)
+    conn = env[1]
+    assert "action=\"/campaigns/1/hold\"" in client.get("/campaigns").text
+    conn.execute("UPDATE campaigns SET status='skipped', joined_at=datetime('now') WHERE id=1")
+    assert "action=\"/campaigns/1/resume\"" in client.get("/campaigns").text
+
+
+def test_leaving_a_campaign_holds_it_and_rejoining_resumes_it(client, env):
+    login(client)
+    conn = env[1]
+    conn.execute("UPDATE campaigns SET joined_at=datetime('now') WHERE id=1")
+    r = client.post("/campaigns/1/hold")
+    assert r.status_code == 303
+    assert conn.execute("SELECT status FROM campaigns WHERE id=1").fetchone()[0] == "skipped"
+    r = client.post("/campaigns/1/resume")
+    assert r.status_code == 303
+    assert conn.execute("SELECT status FROM campaigns WHERE id=1").fetchone()[0] == "active"
+
+
 def test_cross_site_posts_are_refused(client):
     login(client)
     r = client.post("/clip/1/approve", headers={"origin": "http://evil.example"})
@@ -205,10 +237,13 @@ def test_buttons_on_a_held_clip_report_instead_of_approving(env, monkeypatch):
     assert "cannot become approved" in rec.calls[0][1]["text"]
 
 
-def test_sweep_announces_each_ready_clip_once(env, monkeypatch):
+def test_sweep_announces_each_ready_clip_once(env, monkeypatch, tmp_path):
+    from clipforge.taste import book as book_mod
+
     settings, conn = env
     rec = Recorder()
     monkeypatch.setattr(tg, "call", rec)
+    monkeypatch.setattr(book_mod, "books_dir", lambda: tmp_path)          # no real drafts in this test
     assert tg.sweep(conn, settings) == 1
     assert tg.sweep(conn, settings) == 0
     assert [m for m, _ in rec.calls] == ["sendVideo"]
@@ -342,3 +377,232 @@ def test_a_posted_clip_can_be_replaced_and_the_remake_may_post(env, monkeypatch)
                  "status) VALUES (3,1,'p','z','{}',1,'approved')")
     conn.execute("UPDATE campaigns SET joined_at=datetime('now') WHERE id=1")
     assert [r["id"] for r in flow.candidates(conn)] == [3]
+
+
+def test_a_facecam_reply_remakes_the_clip_and_asks_for_a_wide_search(env, monkeypatch):
+    from clipforge.app import redo
+
+    settings, conn, rec = _redo_env(env, monkeypatch, redo.Edit())
+    tg.handle(conn, settings, _note("facecam is not available"))
+    assert review.get(conn, 1)["status"] == "rejected"
+    over = json.loads((settings.data_dir / "work" / "clip-1" / "override.json").read_text())
+    assert over == {"start": 100.0, "end": 130.0, "recam": True}
+    assert "facecam" in rec.calls[-1][1]["text"]
+    assert conn.execute("SELECT COUNT(*) FROM jobs WHERE type='make_clip' AND ref_id=1").fetchone()[0] == 1
+
+
+def test_review_page_splits_blockers_from_things_to_check_by_eye(client, env):
+    conn = env[1]
+    conn.execute("UPDATE clips SET compliance_notes=? WHERE id=1",
+                 ("WARN banned_edits: check by eye, the machine cannot: cover his voice with music\n"
+                  "FAIL facecam: no facecam is visible",))
+    login(client)
+    text = client.get("/ready").text
+    assert "Check by eye: The brief bans these edits" in text and "cover his voice with music" in text
+    assert "Blocks posting: Facecam" in text and "the machine cannot" not in text
+
+
+def test_posted_page_records_the_campaigns_review_and_counts_it(client, env):
+    conn = env[1]
+    conn.execute("UPDATE clips SET status='posted' WHERE id=1")
+    pid = conn.execute("INSERT INTO posts (clip_id, url, posted_at) VALUES (1,'https://y/1',datetime('now'))").lastrowid
+    for v in (5, 40, 90):
+        conn.execute("INSERT INTO stats (post_id, captured_at, views) VALUES (?, datetime('now', ?), ?)",
+                     (pid, f"-{100 - v} minutes", v))
+    login(client)
+    page = client.get("/posted").text
+    assert "<polyline" in page and "A title" in page and "/clip/1/thumb" in page
+    assert client.post(f"/post/{pid}/review", data={"status": "approved"}).status_code == 303
+    assert conn.execute("SELECT campaign_review_status FROM posts WHERE id=?", (pid,)).fetchone()[0] == "approved"
+    assert client.post(f"/post/{pid}/review", data={"status": "nonsense"}).status_code == 303
+    assert conn.execute("SELECT campaign_review_status FROM posts WHERE id=?", (pid,)).fetchone()[0] == "approved"
+    assert "1 approved" in client.get("/campaigns").text
+    home = client.get("/").text
+    assert "Needs you" in home and "Views gained per day" in home
+
+
+def test_spark_and_daily_gains_are_safe_on_thin_data(env):
+    from clipforge.app import stats_view
+
+    assert stats_view.spark([]) == "" and stats_view.spark([7]) == ""
+    assert len(stats_view.spark([0, 0]).split()) == 2
+    days = stats_view.daily_gains(env[1])
+    assert len(days) == 14 and all(d["views"] == 0 and d["day"] for d in days)
+
+
+def test_overview_explains_the_missing_permission_then_shows_countries(client, env):
+    conn = env[1]
+    login(client)
+    assert "No country data yet" in client.get("/").text
+    db.kv_set(conn, "geo_status", "needs_consent")
+    assert "youtube-auth" in client.get("/").text
+    conn.execute("UPDATE clips SET status='posted' WHERE id=1")
+    pid = conn.execute("INSERT INTO posts (clip_id, url, posted_at) VALUES (1,'https://y/1',datetime('now'))").lastrowid
+    conn.executemany("INSERT INTO geo (post_id, country, views) VALUES (?,?,?)", [(pid, "US", 3), (pid, "LK", 1)])
+    assert "75%</span> of 4 counted views" in client.get("/").text
+    assert "Tier 1: 75%" in client.get("/posted").text and "Tier 1: 75%" in client.get("/campaigns").text
+
+
+def test_budget_drain_and_tier1_quota_reach_the_dashboard(client, env):
+    from clipforge.app import stats_view
+    from clipforge.ingest import briefs, rules as rules_mod
+
+    conn = env[1]
+    did = conn.execute(
+        "INSERT INTO discovered (source, external_id, title, platforms_json, budget_total, budget_left, "
+        "campaign_id, state, url) VALUES ('whop','x','Camp','[]',1000,90,1,'joined','u')").lastrowid
+    conn.execute("INSERT INTO budget_log (discovered_id, captured_at, budget_left) "
+                 "VALUES (?, datetime('now','-24 hours'), 190)", (did,))
+    conn.execute("INSERT INTO budget_log (discovered_id, budget_left) VALUES (?, 90)", (did,))
+    b = stats_view.budgets(conn)[1]
+    assert 95 < b["per_day"] < 105 and "runs out in about 1 day" in b["warn"]
+    conn.execute("UPDATE campaigns SET joined_at=datetime('now') WHERE id=1")
+    rules = rules_mod.BriefRules(required_hashtags=["#skiimasktimmy"], min_tier1_share=0.5,
+                                 audience_requirements="US viewers only")
+    briefs.save_rules(conn, 1, rules)
+    conn.execute("UPDATE clips SET status='posted' WHERE id=1")
+    pid = conn.execute("INSERT INTO posts (clip_id, posted_at) VALUES (1, datetime('now'))").lastrowid
+    conn.executemany("INSERT INTO geo (post_id, country, views) VALUES (?,?,?)", [(pid, "US", 1), (pid, "LK", 3)])
+    login(client)
+    home = client.get("/").text
+    assert "runs out in about 1 day" in home and "25% of viewers are Tier 1, the brief wants 50%" in home
+    assert "brief wants 50% Tier 1" in client.get("/campaigns").text
+    page = client.get("/campaigns/1").text
+    assert "At least 50% from Tier 1 countries" in page and "US viewers only" in page and "may not be paid" in page
+
+
+def test_overview_shows_a_live_stream_and_settings_keep_the_live_clip_count(client, env):
+    import json
+    import time
+
+    from clipforge.ingest import live
+
+    conn = env[1]
+    db.kv_set(conn, live.KV_STATE, json.dumps({"at": time.time(), "live": [
+        {"login": "skiimasktimmy", "campaign_id": 1, "since": time.time() - 600, "messages": 1234,
+         "moments": 2, "vod": True}]}))
+    login(client)
+    home = client.get("/").text
+    assert "Live now" in home and "skiimasktimmy" in home and "1,234 messages" in home and "2 reactions" in home
+    db.kv_set(conn, live.KV_STATE, json.dumps({"at": time.time() - 3600, "live": [{"login": "x"}]}))
+    assert "Live now" not in client.get("/").text               # a watcher that stopped reporting
+    client.post("/settings", data={"daily_cap": "3", "post_times": "10:00", "live_clips": "0"})
+    assert live.clips_per_stream(conn) == 0
+
+
+def test_queue_page_lists_what_posts_next_with_scores_and_moves_it(client, env):
+    conn = env[1]
+    conn.execute("UPDATE clips SET status='approved', compliance_ok=1 WHERE id=1")
+    conn.execute("UPDATE campaigns SET joined_at=datetime('now'), status='active' WHERE id=1")
+    login(client)
+    page = client.get("/queue").text
+    assert "Up next to post" in page and "/plan/1/move" in page
+    r = client.post("/plan/1/move", data={"how": "top"}, follow_redirects=False)
+    assert r.status_code in (302, 303)
+    assert conn.execute("SELECT post_rank FROM clips WHERE id=1").fetchone()[0] == 1
+    assert "go back to automatic" in client.get("/queue").text
+    client.post("/plan/reset")
+    assert conn.execute("SELECT post_rank FROM clips WHERE id=1").fetchone()[0] is None
+
+
+@pytest.fixture()
+def books(env, tmp_path, monkeypatch):
+    """A throwaway tastebook/ and rubrics/ with one draft that has a rubric draft beside it."""
+    from clipforge.taste import book as book_mod
+
+    bdir, rdir = tmp_path / "tastebook", tmp_path / "rubrics"
+    bdir.mkdir()
+    rdir.mkdir()
+    monkeypatch.setattr(book_mod, "books_dir", lambda: bdir)
+    monkeypatch.setenv("RUBRICS_DIR", str(rdir))
+    get_settings.cache_clear()
+    data = {"niche": "streamer-skii", "status": "draft", "sample": {"videos": 12},
+            "pace": {"cuts_per_10s": 2.1},
+            "style": {"zoom": {"enabled": True}, "captions": {"highlight": "#FFE000", "words_per_event": 2}}}
+    (bdir / "streamer-skii.draft.json").write_text(json.dumps(data), encoding="utf-8")
+    (bdir / "streamer-skii.draft.md").write_text("# Taste book: streamer-skii (DRAFT)\n", encoding="utf-8")
+    (bdir / "gta.json").write_text(json.dumps({"niche": "gta", "status": "active"}), encoding="utf-8")
+    (rdir / "streamer-skii.draft.json").write_text(json.dumps({
+        "name": "streamer-skii", "evidence": {"rage": {"n": 9, "median_views": 1200000}},
+        "categories": [{"id": "rage", "weight": 1.2, "description": "x"},
+                       {"id": "surprise", "weight": 0.9, "description": "y"}], "penalties": []}),
+        encoding="utf-8")
+    return get_settings(), env[1], bdir, rdir
+
+
+def press(conn, settings, data):
+    tg.handle(conn, settings, {"callback_query": {"id": "1", "data": data,
+              "message": {"chat": {"id": 42}, "message_id": 5}}})
+
+
+def test_a_draft_book_is_announced_once_with_read_approve_reject(books, monkeypatch):
+    settings, conn, bdir, rdir = books
+    rec = Recorder()
+    monkeypatch.setattr(tg, "call", rec)
+    assert tg._sweep_books(conn, settings) == 1 and tg._sweep_books(conn, settings) == 0
+    method, kw = rec.calls[0]
+    assert method == "sendMessage" and "streamer-skii" in kw["text"] and "rubric draft" in kw["text"]
+    assert all(f"{a}:streamer-skii" in kw["reply_markup"] for a in ("tv", "ta", "tr"))
+
+
+def test_read_sends_the_book_file_and_the_rubric_in_words(books, monkeypatch):
+    settings, conn, bdir, rdir = books
+    rec = Recorder()
+    monkeypatch.setattr(tg, "call", rec)
+    press(conn, settings, "tv:streamer-skii")
+    methods = [m for m, _ in rec.calls]
+    assert methods[:3] == ["answerCallbackQuery", "sendDocument", "sendMessage"]   # acknowledged first
+    words = rec.calls[2][1]["text"]
+    assert "1.20  rage (9 top Shorts, median 1,200,000 views)" in words
+    assert (bdir / "streamer-skii.draft.json").is_file()                  # reading changes nothing
+
+
+def test_approve_makes_the_book_and_its_rubric_live(books, monkeypatch):
+    settings, conn, bdir, rdir = books
+    rec = Recorder()
+    monkeypatch.setattr(tg, "call", rec)
+    press(conn, settings, "ta:streamer-skii")
+    assert json.loads((bdir / "streamer-skii.json").read_text(encoding="utf-8"))["status"] == "active"
+    assert (rdir / "streamer-skii.json").is_file() and not (rdir / "streamer-skii.draft.json").exists()
+    assert "approved" in rec.calls[-1][1]["text"]
+
+
+def test_reject_sets_the_draft_aside_without_deleting_it(books, monkeypatch):
+    settings, conn, bdir, rdir = books
+    rec = Recorder()
+    monkeypatch.setattr(tg, "call", rec)
+    press(conn, settings, "tr:streamer-skii")
+    assert (bdir / "streamer-skii.rejected.json").is_file() and (rdir / "streamer-skii.rejected.json").is_file()
+    assert not (bdir / "streamer-skii.json").exists()
+    press(conn, settings, "tr:streamer-skii")                              # a second press just reports
+    assert "no draft" in rec.calls[-1][1]["text"]
+
+
+def test_books_command_lists_live_and_draft_books(books, monkeypatch):
+    settings, conn, bdir, rdir = books
+    rec = Recorder()
+    monkeypatch.setattr(tg, "call", rec)
+    tg.handle(conn, settings, {"message": {"chat": {"id": 42}, "text": "/books"}})
+    text = rec.calls[0][1]["text"]
+    assert "gta: live" in text and "streamer-skii: draft" in text
+    assert "ta:streamer-skii" in rec.calls[0][1]["reply_markup"] and "tv:gta" in rec.calls[0][1]["reply_markup"]
+
+
+class LateRecorder(Recorder):
+    """Telegram refuses the button acknowledgement, as it does for a press read after a restart."""
+
+    def __call__(self, settings, method, **kw):
+        if method == "answerCallbackQuery":
+            raise tg.TelegramError("answerCallbackQuery: Bad Request: query is too old")
+        return super().__call__(settings, method, **kw)
+
+
+def test_a_press_read_too_late_to_acknowledge_still_does_its_job(books, monkeypatch):
+    settings, conn, bdir, rdir = books
+    rec = LateRecorder()
+    monkeypatch.setattr(tg, "call", rec)
+    press(conn, settings, "tv:streamer-skii")
+    assert [m for m, _ in rec.calls][:2] == ["sendDocument", "sendMessage"]
+    press(conn, settings, "a:1")
+    assert review.get(conn, 1)["status"] == "approved"
+    assert "approved" in rec.calls[-1][1]["text"]

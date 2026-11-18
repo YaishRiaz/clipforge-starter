@@ -32,8 +32,10 @@ Fill in only what the note asks for:
 - trim_start: seconds to cut from the start (positive). Negative adds footage before it.
 - trim_end: seconds to cut from the end (positive). Negative adds footage after it.
 - hook: new hook text (under 60 characters, true to the clip), or "" to remove the hook.
+- recheck_cam: true when the note says the facecam / camera / streamer's face is missing, cut off, \
+in the wrong place or not showing. The camera is then searched for again in the footage.
 - unsupported: what the note asks for that these edits cannot do (music, effects, a different \
-moment, camera layout). Empty if everything is covered.
+moment, a different camera layout). Empty if everything is covered.
 "Last few seconds are unclear" means cut about 2 to 3 seconds from the end. To end after a \
 phrase, use the word times to work out how much to cut. Never invent words."""
 
@@ -42,6 +44,7 @@ class Edit(LLMModel):
     trim_start: float = Field(0.0, description="Seconds to cut from the start; negative extends.")
     trim_end: float = Field(0.0, description="Seconds to cut from the end; negative extends.")
     hook: str | None = Field(None, description="New hook text; empty string removes it.")
+    recheck_cam: bool = Field(False, description="Look for the facecam again in the footage.")
     unsupported: str = Field("", description="Part of the note that cannot be done.")
 
 
@@ -49,9 +52,15 @@ class RedoError(ValueError):
     pass
 
 
+CAM_WORDS = re.compile(r"\b(face\s?cam|cam(era)?|webcam|face)\b")
+TIME_WORDS = re.compile(r"\d\s*(s\b|sec)")
+
+
 def _fallback(text: str) -> Edit:
     """Without the model, understand the plainest notes: 'cut the last 3 seconds'."""
     t = text.lower()
+    if CAM_WORDS.search(t):
+        return Edit(recheck_cam=True)
     num = re.search(r"(\d+(?:\.\d+)?)\s*(?:s\b|sec)", t)
     n = float(num.group(1)) if num else 2.0
     if "last" in t or "end" in t:
@@ -70,6 +79,8 @@ def _clip_words(settings: Settings, moment_id: int) -> list:
 
 
 def interpret(conn: sqlite3.Connection, settings: Settings, clip_id: int, note: str) -> Edit:
+    if CAM_WORDS.search(note.lower()) and not TIME_WORDS.search(note.lower()):
+        return Edit(recheck_cam=True)         # a camera complaint needs no model to understand
     row = review.get(conn, clip_id)
     meta = review.meta_of(row)
     words = " ".join(f"{w[2]}@{w[0]:.1f}" for w in _clip_words(settings, row["moment_id"]))
@@ -92,6 +103,8 @@ def describe(edit: Edit) -> str:
                     f"{'from' if edit.trim_end > 0 else 'after'} the end")
     if edit.hook is not None:
         bits.append(f"hook -> {edit.hook!r}" if edit.hook else "removing the hook")
+    if edit.recheck_cam:
+        bits.append("looking for the facecam again in the footage")
     return ", ".join(bits)
 
 
@@ -105,7 +118,7 @@ def apply(conn: sqlite3.Connection, settings: Settings, clip_id: int, edit: Edit
     row = review.get(conn, clip_id)
     if row["status"] not in EDITABLE + (("posted", "submitted") if replace_posted else ()):
         raise RedoError(f"clip {clip_id} is {row['status']}; only clips not yet posted can be remade")
-    if not (edit.trim_start or edit.trim_end or edit.hook is not None):
+    if not (edit.trim_start or edit.trim_end or edit.hook is not None or edit.recheck_cam):
         raise RedoError(edit.unsupported or "I could not find an edit in that note")
     meta = review.meta_of(row)
     start = float(meta.get("source_start") or 0) + edit.trim_start
@@ -128,6 +141,7 @@ def apply(conn: sqlite3.Connection, settings: Settings, clip_id: int, edit: Edit
     work = settings.data_dir / "work" / f"clip-{mid}"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True, exist_ok=True)
-    (work / "override.json").write_text(json.dumps({"start": start, "end": end}), encoding="utf-8")
+    fixed = {"start": start, "end": end, **({"recam": True} if edit.recheck_cam else {})}
+    (work / "override.json").write_text(json.dumps(fixed), encoding="utf-8")
     queue.enqueue(conn, "make_clip", ref_id=mid)
     return mid

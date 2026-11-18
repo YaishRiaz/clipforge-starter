@@ -59,6 +59,10 @@ def check(*, rules: BriefRules | None, layout: Layout, meta: dict, duration: flo
                 fail("mention", f"required mention {mention} is missing")
         if rules.disclosure_text and rules.disclosure_text.lower() not in text:
             fail("disclosure", "the required disclosure text is missing")
+        if rules.required_names_any and not any(n.lower() in text for n in rules.required_names_any):
+            fail("caption", "the caption must mention one of: " + ", ".join(rules.required_names_any))
+        if rules.required_caption and rules.required_caption.lower() not in text:
+            fail("caption", f"the required caption '{rules.required_caption}' is missing")
         handle = meta.get("handle")
         if rules.caption_requirements and handle and \
                 handle.lower() not in (meta.get("description") or "").lower():
@@ -74,8 +78,9 @@ def check(*, rules: BriefRules | None, layout: Layout, meta: dict, duration: flo
         if rules.banned_edits:
             warn("banned_edits", "check by eye, the machine cannot: " + "; ".join(rules.banned_edits))
 
-    if layout.facecam_required and layout.facecam is None:
-        fail("facecam", "the brief requires the facecam visible and no facecam layout is configured")
+    if layout.facecam_required and layout.facecam is None and not layout.cam_full:
+        fail("facecam", layout.cam_note or
+             "the brief requires the facecam visible and no facecam layout is configured")
     if cam_blank:
         fail("facecam", "the facecam band is black; the layout's facecam box misses the camera in this stream")
     if has_profanity(hook):

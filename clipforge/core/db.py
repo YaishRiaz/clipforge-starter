@@ -208,6 +208,41 @@ MIGRATIONS: list[str] = [
     ALTER TABLE sources ADD COLUMN via_channel INTEGER NOT NULL DEFAULT 0;
     UPDATE sources SET via_channel=1 WHERE media_kind='audio' AND length_approved=1;
     """,
+    # 7 - where each post's viewers are, from the channel's own YouTube analytics
+    """
+    CREATE TABLE geo (
+        post_id INTEGER NOT NULL REFERENCES posts(id),
+        country TEXT NOT NULL,
+        views INTEGER NOT NULL,
+        captured_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (post_id, country)
+    );
+    """,
+    # 8 - a joined campaign's remaining budget over time, to see how fast it drains
+    """
+    CREATE TABLE budget_log (
+        discovered_id INTEGER NOT NULL REFERENCES discovered(id),
+        captured_at TEXT NOT NULL DEFAULT (datetime('now')),
+        budget_left REAL NOT NULL
+    );
+    CREATE INDEX budget_log_by_campaign ON budget_log (discovered_id, captured_at);
+    """,
+    # 9 - clipping a stream while it is live: the VOD still being written, and the moments
+    #     found from its chat before the whole VOD could be mined
+    """
+    ALTER TABLE sources ADD COLUMN live INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE moments ADD COLUMN live INTEGER NOT NULL DEFAULT 0;
+    """,
+    # 10 - Yaish's own posting order for approved clips (NULL = the automatic order)
+    """
+    ALTER TABLE clips ADD COLUMN post_rank INTEGER;
+    """,
+    # 11 - the streamer and game spans of a source (from Twitch), and the game of each moment,
+    #      so a clip can use that streamer's and that game's taste book and rubric
+    """
+    ALTER TABLE sources ADD COLUMN games_json TEXT;
+    ALTER TABLE moments ADD COLUMN game TEXT;
+    """,
 ]
 
 

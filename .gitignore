@@ -1,22 +1,10 @@
-.env
+# Python
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
 
-# working data, never committed
-data/
-out/*
-!out/.gitkeep
-inbox/own/*
-!inbox/own/.gitkeep
-*.db
-*.db-wal
-*.db-shm
-
-out/
-
-# never commit these
+# Never commit these: secrets and credentials
 .env
 .env.*
 !.env.example
@@ -24,20 +12,34 @@ out/
 *.key
 client_secret*.json
 token*.json
+
+# Working data: database, downloads, renders, logs
 data/
+out/*
+!out/.gitkeep
+*.db
+*.db-wal
+*.db-shm
+
+# Footage: your own recordings and campaign downloads
+inbox/*
+!inbox/own/
 inbox/own/*
 !inbox/own/.gitkeep
-inbox/*/
+*.mp4
+*.mov
+*.mkv
+
+# Campaign logos are per campaign and often licensed; keep them local
 assets/logos/*
 !assets/logos/.gitkeep
 
-# never commit these
-.env.*
-!.env.example
-*.pem
-*.key
-client_secret*.json
-token*.json
-inbox/*/
-assets/logos/*
-!assets/logos/.gitkeep
+# Taste-book and rubric drafts (approve them first) and rejected drafts
+tastebook/*.draft.*
+tastebook/*.rejected.*
+tastebook/refs/
+rubrics/*.draft.json
+rubrics/*.rejected.*
+
+# Benchmarks are per machine
+docs/benchmark.json

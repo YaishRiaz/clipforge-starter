@@ -1,0 +1,21 @@
+{
+  "niche": "gta",
+  "status": "active",
+  "source": "prior",
+  "evidence": [],
+  "notes": "Starting prior for GTA / RP clips: fast captions, punch-in on shouts, crashes and gunfire.",
+  "style": {
+    "captions": {
+      "words_per_event": 2,
+      "highlight": "#FFE000",
+      "pop": true
+    },
+    "zoom": {
+      "enabled": true,
+      "scale": 1.12,
+      "seconds": 0.7,
+      "max_events": 4,
+      "min_gap": 4.0
+    }
+  }
+}

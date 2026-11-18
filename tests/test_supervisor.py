@@ -199,7 +199,8 @@ def test_power_commands():
     cmds = service.power_commands()
     assert ["powercfg", "/change", "standby-timeout-ac", "0"] in cmds
     assert ["powercfg", "/change", "hibernate-timeout-ac", "0"] in cmds
-    assert any("LIDACTION" in c for c in cmds)
+    for name in ("LIDACTION", "PBUTTONACTION", "SBUTTONACTION"):
+        assert any(name in c for c in cmds)
     assert cmds[-1][:2] == ["powercfg", "/setactive"]
     assert all(not any(w in ("-dc", "standby-timeout-dc") for w in c) for c in cmds)
 

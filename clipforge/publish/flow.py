@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ..app import review, stats_view
@@ -43,10 +44,34 @@ def posted_times(conn: sqlite3.Connection) -> list[datetime]:
         "SELECT posted_at FROM posts WHERE posted_at IS NOT NULL")]
 
 
-def candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Approved clips that are allowed to go out, best score first."""
+RETRY_AFTER = 3600       # a failed upload (an outage, a rate limit) is tried again after this long
+MAX_FAILURES = 2         # a clip that failed this many times waits for Yaish
+
+
+def candidates(conn: sqlite3.Connection, now: float | None = None) -> list[dict]:
+    """Approved clips that are allowed to go out: priority campaigns first, then best score.
+    A campaign whose brief opens later (`post_from`) has nothing eligible until then."""
+    from ..core import priority
+    from ..ingest.briefs import load_rules
+
+    now = time.time() if now is None else now
+    rows = _approved(conn)
+    rules, prio, out = {}, {}, []
+    for r in rows:
+        cid = r["campaign_id"]
+        if cid not in rules:
+            rules[cid] = load_rules(conn, cid)
+            prio[cid] = priority.is_priority(conn, cid, now)
+        if rules[cid] is not None and not rules[cid].may_post(now):
+            continue
+        out.append({**dict(r), "priority": prio[cid]})
+    out.sort(key=lambda c: not c["priority"])          # stable: score order stays inside each group
+    return out
+
+
+def _approved(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT c.id, c.moment_id, m.score FROM clips c "
+        "SELECT c.id, c.moment_id, m.score, c.post_rank, k.id AS campaign_id FROM clips c "
         "JOIN moments m ON m.id=c.moment_id JOIN sources s ON s.id=m.source_id "
         "JOIN campaigns k ON k.id=s.campaign_id "
         "WHERE c.status='approved' AND c.compliance_ok=1 AND k.joined_at IS NOT NULL "
@@ -54,8 +79,9 @@ def candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         "AND NOT EXISTS (SELECT 1 FROM posts p JOIN clips c2 ON c2.id=p.clip_id "
         "                WHERE c2.moment_id=c.moment_id AND c2.status!='rejected') "
         "AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.type=? AND j.ref_id=c.id "
-        "                AND j.status='failed') "
-        "ORDER BY m.score DESC, c.id", (JOB,)).fetchall()
+        "                AND j.status='failed' AND j.updated_at > ?) "
+        "AND (SELECT COUNT(*) FROM jobs j WHERE j.type=? AND j.ref_id=c.id AND j.status='failed') < ? "
+        "ORDER BY m.score DESC, c.id", (JOB, time.time() - RETRY_AFTER, JOB, MAX_FAILURES)).fetchall()
 
 
 def auto_approve(conn: sqlite3.Connection, threshold: float) -> int:
@@ -91,11 +117,70 @@ def next_slot_text(conn: sqlite3.Connection, settings: Settings) -> str:
     return f"{when} around {slot:%H:%M}"
 
 
+def choose(cands: list, prime: list, now: datetime, times: list):
+    """Which approved clip goes out now. Yaish's own order wins; otherwise prime slots (the
+    target audience's evening) get the best clip and the others the weakest, so the best are
+    still there when the next prime slot comes round."""
+    urgent = [c for c in cands if c.get("priority")]
+    if urgent:                     # a priority campaign (GTA VI from launch) goes first, best first
+        ranked = sorted((c for c in urgent if c["post_rank"] is not None), key=lambda c: c["post_rank"])
+        return ranked[0] if ranked else max(urgent, key=lambda c: c["score"] or 0)
+    ranked = sorted((c for c in cands if c["post_rank"] is not None), key=lambda c: c["post_rank"])
+    if ranked:
+        return ranked[0]
+    return cands[0] if not prime or pacing.current_slot(now, times) in prime else cands[-1]
+
+
+def plan(conn: sqlite3.Connection, settings: Settings, now: datetime | None = None,
+         limit: int = 50) -> list[dict]:
+    """The approved clips in the order they will go out, each with its expected slot."""
+    s = schedule(conn, settings, now)
+    cands = list(candidates(conn))
+    prime = pacing.parse_times(s["cfg"]["prime_times"])
+    posted, t, out = list(s["posted"]), s["now"], []
+    while cands and len(out) < limit:
+        slot = pacing.next_slot(t, s["times"], s["cap"], posted, s["gap"])
+        if slot is None:
+            break
+        pick = choose(cands, prime, slot, s["times"])
+        out.append({"clip_id": int(pick["id"]), "score": pick["score"], "at": slot,
+                    "manual": pick["post_rank"] is not None, "urgent": bool(pick.get("priority")),
+                    "prime": pacing.current_slot(slot, s["times"]) in prime})
+        cands.remove(pick)
+        posted.append(slot)
+        t = max(slot, t) + timedelta(minutes=1)
+    return out
+
+
+def reorder(conn: sqlite3.Connection, settings: Settings, clip_id: int, how: str,
+            now: datetime | None = None) -> None:
+    """Move one clip up, down or to the top. The whole list becomes Yaish's order."""
+    order = [p["clip_id"] for p in plan(conn, settings, now, limit=500)]
+    if clip_id not in order:
+        raise ValueError(f"clip {clip_id} is not waiting to post")
+    i = order.index(clip_id)
+    order.pop(i)
+    j = {"top": 0, "up": max(0, i - 1), "down": min(len(order), i + 1),
+         "bottom": len(order)}.get(how)
+    if j is None:
+        raise ValueError(f"unknown move {how!r}")
+    order.insert(j, clip_id)
+    for rank, cid in enumerate(order, start=1):
+        conn.execute("UPDATE clips SET post_rank=? WHERE id=?", (rank, cid))
+
+
+def reset_order(conn: sqlite3.Connection) -> int:
+    return conn.execute("UPDATE clips SET post_rank=NULL WHERE post_rank IS NOT NULL").rowcount
+
+
 def tick(conn: sqlite3.Connection, settings: Settings, now: datetime | None = None) -> int | None:
     """Called every few seconds: in auto mode approve, then queue one upload if a
     slot is open. Returns the clip id queued, or None."""
     s = schedule(conn, settings, now)
     cfg = s["cfg"]
+    from ..core import priority
+
+    priority.boost(conn)
     if cfg["review_mode"] == "auto":
         auto_approve(conn, float(_int(cfg["auto_threshold"], 60)))
     if not youtube.configured(settings):
@@ -106,8 +191,11 @@ def tick(conn: sqlite3.Connection, settings: Settings, now: datetime | None = No
     cands = candidates(conn)
     if not cands or not pacing.is_due(s["now"], s["times"], s["cap"], s["posted"], s["gap"]):
         return None
-    clip_id = int(cands[0]["id"])
-    queue.enqueue(conn, JOB, clip_id)
+    # Prime slots (the target audience's evening) get the best clip; the others take the
+    # weakest, so the best ones are still there when the next prime slot comes round.
+    pick = choose(cands, pacing.parse_times(cfg["prime_times"]), s["now"], s["times"])
+    clip_id = int(pick["id"])
+    queue.enqueue(conn, JOB, clip_id, priority=50)
     return clip_id
 
 
@@ -115,7 +203,7 @@ def enqueue_now(conn: sqlite3.Connection, clip_id: int) -> None:
     """Skip the pacing slot for one clip (manual override). Still needs approval."""
     if not any(r["id"] == clip_id for r in candidates(conn)):
         raise ValueError(f"clip {clip_id} is not approved and eligible to post")
-    queue.enqueue(conn, JOB, clip_id)
+    queue.enqueue(conn, JOB, clip_id, priority=50)
 
 
 # ---- the job ---------------------------------------------------------------
@@ -140,9 +228,12 @@ def stage_upload(ctx) -> None:
     if db.kv_get(conn, f"yt_video_{clip_id}"):
         return
     meta = review.meta_of(row)
+    from ..ingest.briefs import load_rules
+
+    rules = load_rules(conn, int(meta["campaign_id"])) if meta.get("campaign_id") else None
     video = youtube.upload(
         ctx.settings, Path(row["path"]), title=meta["title"], description=meta["description"],
-        tags=meta.get("hashtags", []),
+        tags=meta.get("hashtags", []), paid=bool(rules and rules.paid_promotion),
         session=db.kv_get(conn, f"yt_session_{clip_id}"),
         on_session=lambda s: db.kv_set(conn, f"yt_session_{clip_id}", s),
         beat=ctx.beat)

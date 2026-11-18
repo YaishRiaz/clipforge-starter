@@ -324,3 +324,40 @@ def test_clip_fetch_uses_a_hand_trim_without_snapping(env, monkeypatch):
     handlers.stage_clip_fetch(ctx)
     plan = json.loads((ctx.settings.data_dir / "work" / f"clip-{mid}" / "plan.json").read_text())
     assert (plan["start"], plan["end"]) == (12.5, 24.0) and got["span"] == (11.5, 25.0)
+
+
+def test_a_failed_clip_job_is_retried_once_after_the_wait(env):
+    settings, conn = env
+    cid = make_campaign(conn)
+    sid = add_source(conn, cid, "mined", n=90)
+    mid = add_moment(conn, sid)
+    conn.execute("INSERT INTO jobs (type, ref_id, status, created_at, updated_at) "
+                 "VALUES ('make_clip', ?, 'failed', strftime('%s','now'), strftime('%s','now'))", (mid,))
+    assert autopilot.run(conn, settings, lister=vods(0), fetch=lambda u: "")["clipping"] == 0    # just failed
+    conn.execute("UPDATE jobs SET updated_at = updated_at - ?", (autopilot.RETRY_AFTER + 60,))
+    assert autopilot.run(conn, settings, lister=vods(0), fetch=lambda u: "")["clipping"] == 1
+    conn.execute("UPDATE jobs SET status='failed', updated_at = updated_at - ?", (autopilot.RETRY_AFTER + 60,))
+    assert autopilot.run(conn, settings, lister=vods(0), fetch=lambda u: "")["clipping"] == 0    # failed twice: left alone
+
+
+def test_youtube_sections_are_cut_by_ytdlp_not_by_hls_segments(tmp_path, monkeypatch):
+    from clipforge.edit import hls
+    from clipforge.ingest import download
+
+    assert hls.is_youtube("https://youtube.com/watch?v=x") and hls.is_youtube("https://youtu.be/x")
+    assert not hls.is_youtube("https://twitch.tv/videos/1")
+    seen = []
+
+    def fake_run(args, **kw):
+        seen.append(args)
+        Path(args[args.index("-o") + 1]).write_bytes(b"x" * 20000)
+        return ""
+
+    monkeypatch.setattr(download, "_run", fake_run)
+    monkeypatch.setattr(download, "_ytdlp", lambda: ["yt-dlp"])
+    got = hls.fetch_section("https://youtube.com/watch?v=x", 120.0, 150.0, tmp_path / "s.mp4", max_height=1080)
+    assert got.offset == 120.0 and got.path.is_file()
+    assert "*120.00-150.00" in seen[0] and "--force-keyframes-at-cuts" in seen[0]
+    monkeypatch.setattr(download, "_run", lambda *a, **k: (_ for _ in ()).throw(download.DownloadError("boom")))
+    with pytest.raises(hls.SectionError):
+        hls.fetch_section("https://youtube.com/watch?v=x", 1.0, 9.0, tmp_path / "t.mp4", max_height=1080)

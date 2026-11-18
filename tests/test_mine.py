@@ -406,3 +406,99 @@ def test_mine_does_not_lift_a_hard_limit_hold(conn, home, capsys):
     assert main(["mine", str(sid)]) == 2
     status = conn.execute("SELECT status FROM sources WHERE id=?", (sid,)).fetchone()["status"]
     assert status == "held"
+
+
+def test_a_4k_source_skips_the_scene_scan(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from clipforge.core import media
+
+    f = tmp_path / "x.mp4"
+    for w, h, expect in ((3840, 2160, False), (1920, 1080, True), (2560, 1440, True)):
+        monkeypatch.setattr(media, "probe", lambda p, w=w, h=h: SimpleNamespace(width=w, height=h))
+        assert handlers._cheap_to_scan(f) is expect
+    monkeypatch.setattr(media, "probe", lambda p: (_ for _ in ()).throw(OSError("unreadable")))
+    assert handlers._cheap_to_scan(f) is True
+
+
+def test_moments_outside_the_briefs_allowed_stretch_are_dropped_and_not_cut(conn, home, monkeypatch):
+    from clipforge.ingest.rules import SourceWindow
+
+    url = "https://www.twitch.tv/videos/2929935152"
+    campaign_id = int(conn.execute(
+        "INSERT INTO campaigns (platform, external_id, name, status, joined_at, category) "
+        "VALUES ('contentrewards','sypher','Sypher','active',datetime('now'),'gaming')").lastrowid)
+    rules = BriefRules(approved_source_urls=[url],
+                       source_windows=[SourceWindow(url=url + "?t=00h45m52s", start=2750.0, end=None)])
+    briefs.save_rules(conn, campaign_id, rules)
+    assert rules.inside_window(url, 2800, 2830) and not rules.inside_window(url, 2700, 2760)
+    assert rules.inside_window("https://www.twitch.tv/videos/999", 0, 10)          # no window for other videos
+    capped = BriefRules(source_windows=[SourceWindow(url=url, start=100.0, end=200.0)])
+    assert capped.inside_window(url, 100, 200) and not capped.inside_window(url, 150, 210)
+
+    source_id = prepare_for_score(conn, home)
+    conn.execute("UPDATE sources SET campaign_id=?, url=? WHERE id=?", (campaign_id, url, source_id))
+    peaks = json.loads((home.data_dir / "signals" / f"{source_id}.json").read_text(encoding="utf-8"))
+    a = peaks[0]["start"]
+    cand = lambda s: score_mod.Scored(candidate=Candidate(
+        start=s, end=s + 20, description="d", hook="h", title="t", categories=[], penalties=[],
+        confidence=1.0), score=50.0, rubric_category="x")
+    monkeypatch.setattr(score_mod, "propose", lambda *a_, **k: [cand(a), cand(a + 30)])
+    briefs.save_rules(conn, campaign_id, BriefRules(
+        approved_source_urls=[url], source_windows=[SourceWindow(url=url, start=a + 10, end=None)]))
+    handlers.stage_score(ctx_for(conn, home, source_id))
+    starts = [m["start"] for m in conn.execute("SELECT start FROM moments WHERE source_id=?", (source_id,))]
+    assert starts == [a + 30]
+
+
+def test_only_the_allowed_stretch_is_transcribed_and_times_are_shifted_back(conn, home, monkeypatch):
+    from clipforge.ingest.rules import SourceWindow
+
+    url = "https://www.twitch.tv/videos/2929917089"
+    cid = int(conn.execute(
+        "INSERT INTO campaigns (platform, external_id, name, status, joined_at, category) "
+        "VALUES ('contentrewards','rep','Replays','active',datetime('now'),'gaming')").lastrowid)
+    briefs.save_rules(conn, cid, BriefRules(approved_source_urls=[url],
+                                            source_windows=[SourceWindow(url=url, start=10.0, end=20.0)]))
+    source_id = make_source(conn, home, seconds=40)
+    conn.execute("UPDATE sources SET campaign_id=?, url=? WHERE id=?", (cid, url, source_id))
+    heard = {}
+
+    def fake(path, settings, **kw):
+        heard["seconds"] = media.probe(path).duration
+        return [caps.Segment(1.0, 3.0, "a line")], "fake"
+
+    monkeypatch.setattr(tr, "transcribe", fake)
+    handlers.stage_transcribe(ctx_for(conn, home, source_id))
+    assert 9 < heard["seconds"] < 11                              # ten seconds, not forty
+    got = caps.load(row(conn, source_id)["transcript_path"])
+    assert (got[0].start, got[0].end) == (11.0, 13.0)             # back on the video's own clock
+
+
+def test_scoring_records_each_moments_game_and_uses_the_streamer_and_game_rubrics(conn, home, monkeypatch,
+                                                                                tmp_path):
+    import shutil
+
+    from clipforge.moments import rubric as rubric_mod
+
+    rubrics = tmp_path / "rubrics"                     # only the general rubric: no approved profiles
+    rubrics.mkdir()
+    shutil.copy(home.rubrics_dir / "general.json", rubrics / "general.json")
+    object.__setattr__(home, "rubrics_dir", rubrics)
+    rubric_mod.for_campaign.cache_clear()
+    source_id = prepare_for_score(conn, home)
+    conn.execute("UPDATE sources SET games_json=? WHERE id=?", (json.dumps(
+        {"streamer": "SkiiMaskTimmy", "games": [[0, 30, "Rocket League"], [30, 60, "Run Rob"]]}), source_id))
+    seen = {}
+
+    def capture(segments, peaks, rubric, **kw):
+        seen["rubric"] = rubric.name
+        return [score_mod.Scored(candidate=Candidate(start=s, end=s + 20, description="d", hook="h", title="t",
+                                                     categories=[], penalties=[], confidence=1.0),
+                                 score=50.0, rubric_category="x") for s in (2.0, 36.0)]
+
+    monkeypatch.setattr(score_mod, "propose", capture)
+    handlers.stage_score(ctx_for(conn, home, source_id))
+    games = [r["game"] for r in conn.execute("SELECT game FROM moments WHERE source_id=? ORDER BY start", (source_id,))]
+    assert games == ["Rocket League", "Run Rob"]
+    assert seen["rubric"] == "general"            # no approved streamer or game rubric yet

@@ -1,0 +1,226 @@
+{
+  "niche": "streamer-replays",
+  "status": "active",
+  "source": "measured",
+  "built": "2026-11-17",
+  "sample": {
+    "videos": 12,
+    "inspected_in_frames": 12
+  },
+  "pace": {
+    "cuts_per_10s": 0.91,
+    "median_shot_s": 6.61,
+    "words_per_s": 1.0,
+    "peaks_per_10s": 0.32
+  },
+  "rules": [
+    {
+      "rule": "Median 0.91 hard cuts per 10 s, median shot 6.61 s",
+      "kind": "measured",
+      "support": "12 of 12",
+      "evidence": [
+        {
+          "video": "https://www.youtube.com/shorts/_IE9yLGg8SY?t=7",
+          "t": 7.0,
+          "note": "first hard cut"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/ikWV9HelIXo?t=9",
+          "t": 9.93,
+          "note": "first hard cut"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/E7qnIP_MNI8?t=7",
+          "t": 7.4,
+          "note": "first hard cut"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/VR09RyEUflY?t=6",
+          "t": 6.43,
+          "note": "first hard cut"
+        }
+      ]
+    },
+    {
+      "rule": "Speech runs at a median 1.0 words per second",
+      "kind": "measured",
+      "support": "12 of 12",
+      "evidence": []
+    },
+    {
+      "rule": "Burned-in captions are used",
+      "kind": "looked",
+      "support": "6 of 12",
+      "evidence": [
+        {
+          "video": "https://www.youtube.com/shorts/_IE9yLGg8SY?t=0",
+          "t": 0.4,
+          "note": "middle, white"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/E7qnIP_MNI8?t=0",
+          "t": 0.4,
+          "note": "lower_third, white"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/VR09RyEUflY?t=0",
+          "t": 0.4,
+          "note": "lower_third, white"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/KxQIlWH-Zcg?t=0",
+          "t": 0.4,
+          "note": "middle, white"
+        }
+      ]
+    },
+    {
+      "rule": "Captions sit at the lower third",
+      "kind": "looked",
+      "support": "3 of 6",
+      "evidence": []
+    },
+    {
+      "rule": "A large hook title is on screen from the first frame",
+      "kind": "looked",
+      "support": "7 of 12",
+      "evidence": [
+        {
+          "video": "https://www.youtube.com/shorts/_IE9yLGg8SY?t=0",
+          "t": 0.4,
+          "note": "top"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/E7qnIP_MNI8?t=0",
+          "t": 0.4,
+          "note": "lower_third"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/ipfK23ODkrI?t=0",
+          "t": 0.4,
+          "note": "top"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/fjXLuWzjLtI?t=0",
+          "t": 0.4,
+          "note": "top"
+        }
+      ]
+    },
+    {
+      "rule": "Added emoji graphics appear",
+      "kind": "looked",
+      "support": "4 of 12",
+      "evidence": [
+        {
+          "video": "https://www.youtube.com/shorts/_IE9yLGg8SY?t=0",
+          "t": 0.4,
+          "note": "emoji"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/E7qnIP_MNI8?t=0",
+          "t": 0.4,
+          "note": "emoji"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/VR09RyEUflY?t=0",
+          "t": 0.4,
+          "note": "emoji"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/xIVyyRVTxiQ?t=0",
+          "t": 0.4,
+          "note": "emoji"
+        }
+      ]
+    },
+    {
+      "rule": "Added text banner graphics appear",
+      "kind": "looked",
+      "support": "3 of 12",
+      "evidence": [
+        {
+          "video": "https://www.youtube.com/shorts/E7qnIP_MNI8?t=10",
+          "t": 10.66,
+          "note": "text_banner"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/E7qnIP_MNI8?t=15",
+          "t": 15.99,
+          "note": "text_banner"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/zN94GJfblYc?t=0",
+          "t": 0.4,
+          "note": "text_banner"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/zN94GJfblYc?t=6",
+          "t": 6.01,
+          "note": "text_banner"
+        }
+      ]
+    },
+    {
+      "rule": "Added logo graphics appear",
+      "kind": "looked",
+      "support": "3 of 12",
+      "evidence": [
+        {
+          "video": "https://www.youtube.com/shorts/zN94GJfblYc?t=0",
+          "t": 0.4,
+          "note": "logo"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/zN94GJfblYc?t=6",
+          "t": 6.01,
+          "note": "logo"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/zN94GJfblYc?t=12",
+          "t": 12.03,
+          "note": "logo"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/zN94GJfblYc?t=18",
+          "t": 18.04,
+          "note": "logo"
+        }
+      ]
+    }
+  ],
+  "unsupported": [
+    "captions show 6 words at once in the references; ClipForge keeps 1-4 word captions",
+    "text_banner graphics are in the references; the renderer has no support for them yet",
+    "logo graphics are in the references; the renderer has no support for them yet"
+  ],
+  "unknown": [
+    "Zoom and punch-in use in the references (frame sampling cannot tell a zoom from a camera move).",
+    "Music, sound effects and sound design (only loudness peaks were measured).",
+    "Which edits were made by the original creator and which were later additions."
+  ],
+  "style": {
+    "captions": {
+      "margin_v": 330,
+      "color": "#FFFFFF",
+      "uppercase": false
+    },
+    "hook": {
+      "enabled": true
+    },
+    "zoom": {
+      "enabled": false,
+      "min_gap": 6.6,
+      "max_events": 2,
+      "scale": 1.1,
+      "seconds": 0.7
+    },
+    "cuts": {
+      "trim_lines": false
+    },
+    "emoji": {
+      "enabled": true,
+      "max_events": 3
+    }
+  }
+}

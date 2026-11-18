@@ -28,7 +28,13 @@ AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
 VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
-SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+# Upload, plus read-only analytics so the dashboard can show where viewers are.
+# A token granted before the analytics scopes were added still uploads; the
+# geography call then answers 403 and Yaish runs youtube-auth again.
+SCOPE = " ".join(["https://www.googleapis.com/auth/youtube.upload",
+                  "https://www.googleapis.com/auth/yt-analytics.readonly",
+                  "https://www.googleapis.com/auth/youtube.readonly"])
+REPORTS_URL = "https://youtubeanalytics.googleapis.com/v2/reports"
 GAMING_CATEGORY = "20"
 CHUNK = 8 * 1024 * 1024                 # must be a multiple of 256 KiB
 TRANSIENT = {500, 502, 503, 504}
@@ -160,12 +166,19 @@ def access_token(settings: Settings) -> str:
     return r.json()["access_token"]
 
 
-def snippet_body(title: str, description: str, tags: list[str]) -> dict:
-    return {
+def snippet_body(title: str, description: str, tags: list[str], paid: bool = False) -> dict:
+    body = {
         "snippet": {"title": title[:100], "description": description[:4900],
                     "tags": [t.lstrip("#") for t in tags][:15], "categoryId": GAMING_CATEGORY},
         "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False},
     }
+    if paid:      # YouTube's own "includes paid promotion" label, for briefs that ask for it
+        body["paidProductPlacementDetails"] = {"hasPaidProductPlacement": True}
+    return body
+
+
+def upload_parts(paid: bool = False) -> str:
+    return "snippet,status,paidProductPlacementDetails" if paid else "snippet,status"
 
 
 def _offset(r: httpx.Response) -> int:
@@ -187,7 +200,7 @@ def _query(client: httpx.Client, session: str, size: int) -> tuple[int, dict | N
 
 def upload(settings: Settings, path: Path, *, title: str, description: str, tags: list[str],
            session: str | None = None, on_session: Callable[[str], None] | None = None,
-           beat: Callable[[], None] | None = None) -> dict:
+           beat: Callable[[], None] | None = None, paid: bool = False) -> dict:
     """Upload one video and return YouTube's video resource (has "id").
 
     `session` is a resumable-upload address saved from an earlier attempt, so a
@@ -207,10 +220,10 @@ def upload(settings: Settings, path: Path, *, title: str, description: str, tags
             except LookupError:
                 session = None
         if not session:
-            r = client.post(UPLOAD_URL, params={"uploadType": "resumable", "part": "snippet,status"},
+            r = client.post(UPLOAD_URL, params={"uploadType": "resumable", "part": upload_parts(paid)},
                             headers={"X-Upload-Content-Length": str(size),
                                      "X-Upload-Content-Type": "video/mp4"},
-                            json=snippet_body(title, description, tags))
+                            json=snippet_body(title, description, tags, paid))
             if r.status_code != 200 or not r.headers.get("Location"):
                 raise YouTubeError(f"upload start: {_reason(r)}")
             session = r.headers["Location"]
@@ -247,6 +260,30 @@ def upload(settings: Settings, path: Path, *, title: str, description: str, tags
                         return finished
                     continue
                 raise YouTubeError(f"upload: {_reason(r)}")
+
+
+class NeedsConsent(YouTubeError):
+    """The saved sign-in does not cover analytics, or the Analytics API is off."""
+
+
+def views_by_country(token: str, video_id: str | None, start: str, end: str, *, get=None) -> dict[str, int]:
+    """Views per country (ISO code) from the channel's own analytics: one video, or with
+    `video_id` None the whole channel. YouTube leaves out countries (and whole videos)
+    with too few views, so a small video often comes back empty."""
+    params = {"ids": "channel==MINE", "startDate": start, "endDate": end, "metrics": "views",
+              "dimensions": "country", "sort": "-views", "maxResults": 50}
+    if video_id:
+        params["filters"] = f"video=={video_id}"
+    try:
+        r = (get or httpx.get)(REPORTS_URL, timeout=30, params=params,
+                               headers={"Authorization": f"Bearer {token}"})
+    except httpx.HTTPError as exc:
+        raise YouTubeError(f"analytics: {type(exc).__name__}") from None
+    if r.status_code in (401, 403):
+        raise NeedsConsent(f"analytics: {_reason(r)}")
+    if r.status_code != 200:
+        raise YouTubeError(f"analytics: {_reason(r)}")
+    return {str(row[0]).upper(): int(row[1]) for row in r.json().get("rows") or []}
 
 
 def lookup(settings: Settings, video_ids: list[str]) -> dict[str, dict]:

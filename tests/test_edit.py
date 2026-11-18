@@ -81,7 +81,7 @@ def test_stacked_graph_fills_the_frame_exactly():
 # ---- captions ------------------------------------------------------------
 
 def test_mask_hides_profanity_but_keeps_ordinary_words():
-    assert subs.mask("What the fuck, shit happens") == "What the f***, s*** happens"
+    assert subs.mask("What the fuck, shit happens") == "What the f**k, s**t happens"
     assert subs.mask("Scunthorpe classic") == "Scunthorpe classic"
     assert subs.has_profanity("oh SHIT") and not subs.has_profanity("hello")
 
@@ -103,8 +103,8 @@ def test_ass_has_hook_handle_and_masked_captions():
     ass = subs.build_ass(hook="What the fuck?!", handle="twitch.tv/x",
                          events=[(0.0, 1.0, "oh shit")], duration=10.0, cam_height=594)
     assert "PlayResX: 1080" in ass and "PlayResY: 1920" in ass
-    assert "WHAT THE F***?!" in ass
-    assert "S***" in ass and "twitch.tv/x" in ass
+    assert "WHAT THE F**K?!" in ass
+    assert "S**T" in ass and "twitch.tv/x" in ass
     assert "fuck" not in ass.lower() and "shit" not in ass.lower()
 
 
@@ -367,3 +367,135 @@ def test_blank_cam_fails_compliance():
               has_audio=True, overlay_burned=True, hook="", spoken="")
     assert not any(f.code == "facecam" for f in compliance.check(**kw))
     assert any(f.code == "facecam" and f.level == "FAIL" for f in compliance.check(**kw, cam_blank=True))
+
+
+def test_caption_events_never_overlap_when_word_times_touch():
+    from clipforge.edit import subs
+
+    # the transcriber pads each word, so neighbours overlap by 50 ms
+    words = [(0.27, 0.56, "I'm"), (0.51, 0.64, "gonna"), (0.59, 0.76, "go"), (0.71, 0.92, "rob"),
+             (0.87, 1.34, "someone."), (1.30, 1.60, "now")]
+    for events in (subs.highlight_events(words, 2, "&H00FFFFFF", "&H0000E0FF"),
+                   subs.caption_events(words)):
+        assert len(events) >= 3
+        for a, b in zip(events, events[1:]):
+            assert b[0] >= a[0] + subs.MIN_STEP - 1e-9
+            assert a[1] <= b[0] + 1e-9
+            assert a[1] > a[0]
+
+
+def test_no_overlap_keeps_order_and_text():
+    from clipforge.edit import subs
+
+    out = subs.no_overlap([(1.0, 2.0, "b"), (0.0, 1.5, "a"), (1.01, 1.4, "c")])
+    assert [e[2] for e in out] == ["a", "b", "c"]
+    assert out[0][1] <= out[1][0] and out[1][1] <= out[2][0]
+
+
+def test_draft_tells_the_model_who_the_streamer_is_and_what_the_brief_says(monkeypatch):
+    sent = {}
+
+    def fake(schema, system, user, **kw):
+        sent.update(system=system, user=user)
+        return meta.Draft(title="Timmy loses it", description="d")
+
+    monkeypatch.setattr(meta.llm, "parse", fake)
+    rules = BriefRules(caption_requirements="Caption must include the handle")
+    d = meta.draft({"title": "T", "hook": "H", "description": "D"}, "words",
+                   settings=__import__("clipforge.core.config", fromlist=["get_settings"]).get_settings(),
+                   creator="skiimasktimmy", rules=rules)
+    assert d.title == "Timmy loses it"
+    assert "Streamer: skiimasktimmy" in sent["user"] and "Caption must include the handle" in sent["user"]
+    assert "teammate" in sent["system"] and "brief" in sent["system"]
+
+
+def test_the_briefs_required_caption_always_leads_the_post_text_and_is_checked():
+    rules = BriefRules(required_caption="Jake Paul On YouTube")
+    got = meta.finish(meta.Draft(title="Why your AI needs context", description="He explains it."),
+                      rules=rules, handle=None)
+    assert got["description"].splitlines()[0] == "Jake Paul On YouTube"
+    same = meta.finish(meta.Draft(title="Jake Paul On YouTube", description="He explains it."),
+                       rules=rules, handle=None)
+    assert same["description"].count("Jake Paul On YouTube") == 0          # the title already carries it
+    assert "Jake Paul On YouTube" not in meta.finish(
+        meta.Draft(title="T", description="d"), rules=BriefRules(), handle=None)["description"]
+    assert "caption" not in codes(_check(rules, meta=got), "FAIL")
+    assert "caption" in codes(_check(rules, meta={"title": "T", "description": "d"}), "FAIL")
+
+
+def test_a_required_name_is_added_when_the_caption_has_none_and_checked():
+    rules = BriefRules(required_names_any=["Sypher", "Maddynf", "Replays"])
+    plain = meta.finish(meta.Draft(title="Insane build battle", description="A wild round."),
+                        rules=rules, handle=None)
+    assert plain["description"].splitlines()[0] == "Featuring Sypher"
+    named = meta.finish(meta.Draft(title="Maddynf wins the round", description="Wild."),
+                        rules=rules, handle=None)
+    assert "Featuring" not in named["description"]
+    assert "caption" not in codes(_check(rules, meta=plain), "FAIL")
+    assert "caption" in codes(_check(rules, meta={"title": "t", "description": "d"}), "FAIL")
+
+
+def test_a_stream_clip_credits_the_channel_in_the_text_only():
+    credit = meta.stream_credit("https://twitch.tv/videos/2929917089", "Replays")
+    assert credit == "twitch.tv/replays"
+    got = meta.finish(meta.Draft(title="Replays wins", description="Wild.", hashtags=["#uefn"]),
+                      rules=None, handle=None, credit=credit)
+    assert "Full stream: twitch.tv/replays" in got["description"] and got["handle"] is None
+    assert got["description"].splitlines()[-1] == "#uefn"                    # tags stay last
+    assert meta.stream_credit("https://youtube.com/watch?v=x", "Replays") is None
+    assert meta.stream_credit("https://twitch.tv/videos/1", "名前") is None    # not a login
+    with_handle = meta.finish(meta.Draft(title="t", description="d"), rules=None,
+                              handle="kick.com/x", credit="twitch.tv/y")
+    assert "Full stream" not in with_handle["description"]
+
+
+def test_swear_words_are_starred_like_s_star_star_t_and_innocent_words_are_kept():
+    from clipforge.edit.subs import has_profanity, mask
+
+    assert mask("SHIT") == "S**T" and mask("fuck") == "f**k"
+    assert mask("bullshit move") == "b******t move" and mask("fuckin hell") == "f****n hell"
+    assert mask("Dickens in the cockpit") == "Dickens in the cockpit"
+    assert mask("what a dick") == "what a d**k" and mask("ok bro") == "ok bro"
+    assert has_profanity("shitting") and not has_profanity("assist the cockpit")
+
+
+def test_an_edited_video_is_shown_whole_and_the_hook_never_sits_on_a_face():
+    from clipforge.edit import layout as lay_mod
+
+    m = {"rubric_category": "insight"}
+    assert lay_mod.for_moment("tjr", m, None, produced=True).fit
+    assert not lay_mod.for_moment("tjr", m, None).fit
+    assert lay_mod.is_stream("https://www.twitch.tv/videos/1") and not lay_mod.is_stream("https://youtube.com/watch?v=x")
+    assert subs.hook_y(400, False) == subs.OUT_H // 2 + 60          # on the seam under a facecam band
+    assert subs.hook_y(0, True) < (subs.OUT_H - subs.OUT_W * 9 // 16) // 2   # inside the empty top band
+    assert subs.hook_y(0, False) < subs.OUT_H // 4                  # well above a centred face
+    ass = subs.build_ass(hook="Hi", handle=None, events=[], duration=3, cam_height=0, fit=True)
+    assert f"\pos({subs.OUT_W // 2},{subs.hook_y(0, True)})" in ass
+
+
+def test_full_gameplay_puts_the_whole_game_under_the_facecam_and_text_below_it():
+    from dataclasses import replace
+
+    from clipforge.edit import layout as lay_mod
+
+    lay = replace(lay_mod.for_moment("replays", {"rubric_category": "x"}, None, game_full=True),
+                  facecam=lay_mod.Box(8, 150, 194, 106))
+    graph = lay_mod.filter_graph(lay)
+    assert f"scale={subs.OUT_W}:{lay_mod.GAME_FULL_H}" in graph and "crop=194:106:8:150" in graph
+    assert f"overlay=0:{lay.cam_height}" in graph
+    assert lay.cam_height <= lay_mod.MAX_FULL_CAM and lay.game_bottom == lay.cam_height + lay_mod.GAME_FULL_H
+    assert subs.hook_y(lay.cam_height, False, lay.game_bottom) > lay.game_bottom      # never on the game
+    no_cam = lay_mod.for_moment("nobody", {"rubric_category": "x"}, None, game_full=True)
+    assert "boxblur" in lay_mod.filter_graph(no_cam)                                  # whole picture, blurred bands
+    assert not lay_mod.for_moment("replays", {"rubric_category": "x"}, None).game_full
+
+
+def test_a_banner_title_stays_for_the_whole_clip_on_a_box_in_its_own_font():
+    from clipforge.taste.style import Style
+
+    st = Style.model_validate({"hook": {"banner": True, "box": True, "font": "Impact"}})
+    ass = subs.build_ass(hook="Big title", handle=None, events=[], duration=12.0, cam_height=0, style=st)
+    assert "Style: Hook,Impact," in ass and ",3,14,0,5," in ass
+    assert "Dialogue: 1,0:00:00.00,0:00:12.00,Hook" in ass
+    plain = subs.build_ass(hook="Big title", handle=None, events=[], duration=12.0, cam_height=0)
+    assert "Dialogue: 1,0:00:00.00,0:00:01.80,Hook" in plain and "Style: Hook,Arial," in plain

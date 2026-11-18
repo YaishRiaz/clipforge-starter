@@ -1,23 +1,23 @@
 {% extends "base.html" %}{% block body %}
-<h1>Ready for review</h1>
-{% if not items %}<div class="card mute">No clips waiting.</div>{% endif %}
+<h1>Review</h1>
+{% if not total %}<div class="card mute">No clips waiting. New ones appear here as they are made.</div>{% endif %}
+{% for name, items in groups %}
+<div class="sec">{{ name }} ({{ items|length }})</div>
 {% for it in items %}{% set r = it.row %}
 <div class="card clip">
 <div><video controls preload="none" playsinline poster="/clip/{{ r.id }}/thumb" src="/clip/{{ r.id }}/video"></video></div>
 <div>
-<div><span class="tag">clip {{ r.id }}</span>
-<span class="tag {{ 'ok' if r.status == 'approved' else ('bad' if r.status == 'held' else '') }}">{{ r.status }}</span>
-<span class="tag">score {{ '%.0f'|format(r.score or 0) }}</span>
-<span class="tag">{{ '%.0f'|format(it.meta.duration or 0) }}s</span></div>
-<h2 style="font-size:1.1rem;margin:.6rem 0 .3rem">{{ it.meta.title }}</h2>
-<div class="mute" style="white-space:pre-line">{{ it.meta.description }}</div>
-{% if it.meta.hook %}<p class="mute">Hook: {{ it.meta.hook }}</p>{% endif %}
-{% for n in it.notes %}<div class="{{ 'bad' if n.startswith('FAIL') else 'warn' }}">{{ n }}</div>{% endfor %}
-{% if it.meta.review_note %}<div class="mute">Note: {{ it.meta.review_note }}</div>{% endif %}
+<h2 style="font-size:1.1rem;margin:0 0 .2rem">{{ it.meta.title }}</h2>
+<div class="mute">Clip {{ r.id }}, {{ r.campaign_name }}, {{ '%.0f'|format(it.meta.duration or 0) }} s, score {{ '%.0f'|format(r.score or 0) }}</div>
+{% for n in it.fails %}<div class="note fail"><b>Blocks posting: {{ n.title }}</b><small>{{ n.detail }}</small></div>{% endfor %}
+{% for n in it.warns %}<div class="note"><b>Check by eye: {{ n.title }}</b><small>{{ n.detail }}</small></div>{% endfor %}
+{% if it.meta.hook %}<p style="margin:.6rem 0 .2rem"><span class="mute">Hook on screen:</span> {{ it.meta.hook }}</p>{% endif %}
+<details><summary>Description and hashtags</summary><div class="mute" style="white-space:pre-line">{{ it.meta.description }}</div></details>
+{% if it.meta.review_note %}<div class="mute" style="margin-top:.4rem">Note: {{ it.meta.review_note }}</div>{% endif %}
 <div class="row">
 {% if r.status == 'ready' %}
 <form method="post" action="/clip/{{ r.id }}/approve"><button class="good">Approve</button></form>
-<a class="btn ghost" href="/clip/{{ r.id }}/edit">Edit</a>
+<a class="btn ghost" href="/clip/{{ r.id }}/edit">Edit text</a>
 <form method="post" action="/clip/{{ r.id }}/reject"><button class="danger">Reject</button></form>
 {% elif r.status == 'approved' %}
 <form method="post" action="/clip/{{ r.id }}/restore"><button class="ghost">Undo approval</button></form>
@@ -26,5 +26,5 @@
 {% endif %}
 <a class="btn ghost" href="/clip/{{ r.id }}/package">Download package</a>
 </div></div></div>
-{% endfor %}
+{% endfor %}{% endfor %}
 {% endblock %}

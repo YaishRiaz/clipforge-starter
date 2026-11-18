@@ -1,0 +1,21 @@
+{
+  "niche": "gaming",
+  "status": "active",
+  "source": "prior",
+  "evidence": [],
+  "notes": "Starting prior. Loud moments get a short punch-in on the gameplay band only.",
+  "style": {
+    "captions": {
+      "words_per_event": 2,
+      "highlight": "#FFE000",
+      "pop": true
+    },
+    "zoom": {
+      "enabled": true,
+      "scale": 1.1,
+      "seconds": 0.7,
+      "max_events": 4,
+      "min_gap": 4.0
+    }
+  }
+}

@@ -10,7 +10,7 @@ Two providers, chosen with LLM_PROVIDER:
 - `groq` - any OpenAI-compatible endpoint. Groq's free tier serves open-weight
   models, so this route costs nothing.
 - `gemini` - Google's OpenAI-compatible endpoint. Free tier, but Google may use
-  free-tier prompts to improve its products; check the free-tier terms before using it on
+  free-tier prompts to improve its products; see PROGRESS.md before using it on
   campaign material.
 
 Both return a validated Pydantic instance, so a malformed answer fails here

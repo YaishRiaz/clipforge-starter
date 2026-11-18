@@ -39,18 +39,28 @@ class Change:
     new: float
 
 
-def own_views(conn: sqlite3.Connection, *, settle_hours: float = SETTLE_HOURS) -> dict[str, list[int]]:
-    """Latest view count of each settled post, grouped by the moment's rubric category."""
+def own_views(conn: sqlite3.Connection, *, niche: str | None = None, rubrics_dir: Path | None = None,
+              settle_hours: float = SETTLE_HOURS) -> dict[str, list[int]]:
+    """Latest view count of each settled post, grouped by the moment's rubric category.
+
+    Without `niche` this pools every campaign together (the old behaviour). With it, only
+    posts whose campaign resolves to that rubric file count -- so a GTA clip's "big_reaction"
+    never gets mixed into the general rubric's median just because the category id matches.
+    """
     out: dict[str, list[int]] = {}
     for r in conn.execute(
-        "SELECT m.rubric_category cat, "
-        "(SELECT views FROM stats s WHERE s.post_id=p.id ORDER BY captured_at DESC LIMIT 1) views "
-        "FROM posts p JOIN clips k ON k.id=p.clip_id JOIN moments m ON m.id=k.moment_id "
+        "SELECT m.rubric_category cat, k.category camp_cat, "
+        "(SELECT views FROM stats st WHERE st.post_id=p.id ORDER BY captured_at DESC LIMIT 1) views "
+        "FROM posts p JOIN clips cl ON cl.id=p.clip_id JOIN moments m ON m.id=cl.moment_id "
+        "JOIN sources s ON s.id=m.source_id JOIN campaigns k ON k.id=s.campaign_id "
         "WHERE p.posted_at IS NOT NULL AND p.posted_at <= datetime('now', ?)",
         (f"-{settle_hours} hours",),
     ):
-        if r["views"] is not None and r["cat"]:
-            out.setdefault(r["cat"], []).append(int(r["views"]))
+        if r["views"] is None or not r["cat"]:
+            continue
+        if niche is not None and rubric_mod.niche_of(rubrics_dir, r["camp_cat"]) != niche:
+            continue
+        out.setdefault(r["cat"], []).append(int(r["views"]))
     return out
 
 

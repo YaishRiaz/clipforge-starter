@@ -1,12 +1,29 @@
 {% extends "base.html" %}{% block body %}
 <h1>Posted</h1>
 {% if not posts %}<div class="card mute">Nothing posted yet. Approved clips go out at the posting times set under Settings.</div>{% else %}
-<div class="card scroll"><table>
-<tr><th>Clip</th><th>Campaign</th><th>Link</th><th>Views</th><th>Submitted</th><th>Review</th><th>Est. USD</th></tr>
-{% for p in posts %}<tr><td>{{ p.clip_id }}</td><td>{{ p.campaign }}</td>
-<td>{% if p.url %}<a style="color:var(--accent)" href="{{ p.url }}">open</a>{% endif %}</td>
-<td>{{ '{:,}'.format(p.views) }}</td>
-<td>{% if p.submitted_at %}{{ p.submitted_at }}{% else %}<form method="post" action="/post/{{ p.id }}/submitted"><button class="ghost">Mark submitted</button></form>{% endif %}</td>
-<td>{{ p.campaign_review_status }}</td><td>${{ '%.2f'|format(p.estimate) }}</td></tr>{% endfor %}
-</table></div>{% endif %}
+<div class="grid">
+<div class="card"><div class="mute">Posted</div><div class="big">{{ counts.posted }}</div></div>
+<div class="card"><div class="mute">Links submitted</div><div class="big">{{ counts.submitted }}</div></div>
+<div class="card"><div class="mute">Approved by campaign</div><div class="big">{{ counts.approved }}</div></div>
+<div class="card"><div class="mute">Rejected</div><div class="big">{{ counts.rejected }}</div></div>
+<div class="card"><div class="mute">Awaiting review</div><div class="big">{{ counts.pending }}</div></div>
+</div>
+<div class="card">
+{% for p in posts %}<div class="item">
+<img class="thumb" src="/clip/{{ p.clip_id }}/thumb" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+<div class="grow"><div class="title">{% if p.url %}<a href="{{ p.url }}" target="_blank" rel="noopener noreferrer">{{ p.title }}</a>{% else %}{{ p.title }}{% endif %}</div>
+<div class="mute">Clip {{ p.clip_id }}, {{ p.campaign }}</div>
+<div class="row" style="margin-top:.35rem">
+{% if p.submitted_at %}<span class="tag ok">link submitted</span>{% else %}<form method="post" action="/post/{{ p.id }}/submitted"><button class="small">Mark link submitted</button></form>{% endif %}
+<form method="post" action="/post/{{ p.id }}/review"><select class="mini" name="status" onchange="this.form.submit()" aria-label="Campaign review">
+{% for s in ['pending','approved','rejected'] %}<option value="{{ s }}" {{ 'selected' if p.campaign_review_status == s }}>Review: {{ s }}</option>{% endfor %}</select></form>
+{% if p.geo %}<span class="tag {{ 'ok' if p.geo.tier1 >= 0.3 else '' }}" title="{% for g in p.geo.top %}{{ g.country }} {{ g.pct }}%{{ ', ' if not loop.last }}{% endfor %}">Tier 1: {{ '%.0f'|format(p.geo.tier1 * 100) }}%</span>{% endif %}
+</div></div>
+{% if p.spark %}<svg class="spark" viewBox="0 0 120 30" role="img" aria-label="Views over time"><title>Views since posting</title><polyline points="{{ p.spark }}"/></svg>{% endif %}
+<div class="num"><div class="big" style="font-size:1.15rem">{{ '{:,}'.format(p.views) }}</div><div class="mute">views</div></div>
+<div class="num hide-s"><div>${{ '%.2f'|format(p.estimate) }}</div><div class="mute">est.</div></div>
+</div>{% endfor %}
+</div>
+<p class="mute">Set "Review" to what the campaign decided once you see it on the platform. Approval rates and earnings are counted from that.</p>
+{% endif %}
 {% endblock %}

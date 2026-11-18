@@ -1,11 +1,23 @@
 {% extends "base.html" %}{% block body %}
 <h1>Queue</h1>
-<div class="card">{% for s in ['queued','running','done','failed'] %}<span class="tag {{ 'bad' if s == 'failed' and counts.get(s) else '' }}">{{ s }} {{ counts.get(s, 0) }}</span> {% endfor %}</div>
+<div class="card"><h2 style="margin-top:0">Up next to post</h2>
+{% if upnext %}<p class="mute" style="margin-top:0">Approved clips in the order they will go out. Next post {{ next_post }}. {% if upnext|selectattr("manual")|list %}You set this order; <form method="post" action="/plan/reset" style="display:inline"><button class="ghost small">go back to automatic</button></form>{% else %}Automatic: best-clip times post the highest score, the others the lowest. Move a clip to set your own order.{% endif %}</p>
+<table><tr><th>#</th><th></th><th>Clip</th><th>Score</th><th>Expected</th><th>Move</th></tr>
+{% for p in upnext %}<tr><td>{{ loop.index }}</td><td><img class="thumb" src="/clip/{{ p.clip_id }}/thumb" alt="" loading="lazy" style="width:44px;height:78px;object-fit:cover;border-radius:6px"></td><td><b>{{ p.title }}</b><div class="mute" style="font-size:.8rem">{{ p.campaign }} &middot; clip {{ p.clip_id }}{% if p.duration %} &middot; {{ '%.0f'|format(p.duration) }} s{% endif %}</div></td><td><span class="tag {{ 'ok' if p.score >= 40 else '' }}">{{ '%.1f'|format(p.score) }}</span></td><td>{{ p.when }}{% if p.prime %} <span class="tag ok" title="A best-clip time: the US evening">prime</span>{% endif %}</td><td style="white-space:nowrap">{% for how, label in [('top', 'Top'), ('up', '&uarr;'), ('down', '&darr;')] %}<form method="post" action="/plan/{{ p.clip_id }}/move" style="display:inline"><input type="hidden" name="how" value="{{ how }}"><button class="ghost small" title="Move {{ how }}">{{ label|safe }}</button></form>{% endfor %}</td></tr>
+{% endfor %}</table>
+{% else %}<p class="mute" style="margin:0">Nothing approved is waiting. Approve clips on Review and they line up here.</p>{% endif %}</div>
+<h2>Work in progress</h2>
+<div class="card">{% for s in ['queued','running','done','failed'] %}<span class="tag {{ 'bad' if s == 'failed' and counts.get(s) else '' }}">{{ s }} {{ counts.get(s, 0) }}</span> {% endfor %}
+<span class="mute">&middot; background scan: {{ tick.status if tick else 'never run' }}{% if tick %}, {{ tick.ago }}{% endif %}</span></div>
+<p class="mute">The actual work: fetching footage, finding moments, making and posting clips. The background scan that looks for new footage runs constantly and isn't listed row by row here.</p>
 <div class="card scroll"><table>
-<tr><th>#</th><th>Job</th><th>Ref</th><th>Status</th><th>Last stage</th><th>Error</th><th></th></tr>
-{% for j in jobs %}<tr><td>{{ j.id }}</td><td>{{ j.type }}</td><td>{{ j.ref_id or '' }}</td>
-<td class="{{ 'bad' if j.status == 'failed' else ('ok' if j.status == 'done' else '') }}">{{ j.status }}</td>
+<tr><th title="What kind of work this is">Doing</th><th title="Which campaign and clip it's about">What</th>
+<th title="queued: waiting its turn. running: happening now. done: finished. failed: needs a look">Status</th>
+<th title="Where it got to, for a running or failed job">Last step</th><th title="The error, if it failed">Error</th><th></th></tr>
+{% for j in jobs %}<tr><td>{{ j.label }}<div class="mute" style="font-size:.78rem">job {{ j.id }}</div></td><td style="overflow-wrap:break-word">{{ j.what }}</td>
+<td><span class="tag {{ 'bad' if j.status == 'failed' else ('ok' if j.status == 'done' else '') }}">{{ j.status }}</span></td>
 <td>{{ j.stage or '' }}</td><td class="mute">{{ (j.last_error or '')[:160] }}</td>
-<td>{% if j.status == 'failed' %}<form method="post" action="/job/{{ j.id }}/retry"><button class="ghost">Retry</button></form>{% endif %}</td></tr>{% endfor %}
+<td>{% if j.status == 'failed' %}<form method="post" action="/job/{{ j.id }}/retry"><button class="ghost small">Retry</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="6" class="mute">Nothing in the content queue right now.</td></tr>{% endfor %}
 </table></div>
 {% endblock %}

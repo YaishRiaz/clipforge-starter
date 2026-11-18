@@ -1,0 +1,243 @@
+{
+  "niche": "streamer-skiimasktimmy",
+  "status": "active",
+  "source": "measured",
+  "built": "2026-11-17",
+  "sample": {
+    "videos": 12,
+    "inspected_in_frames": 12
+  },
+  "pace": {
+    "cuts_per_10s": 0.13,
+    "median_shot_s": 19.5,
+    "words_per_s": 2.5,
+    "peaks_per_10s": 0.0
+  },
+  "rules": [
+    {
+      "rule": "Median 0.13 hard cuts per 10 s, median shot 19.5 s",
+      "kind": "measured",
+      "support": "12 of 12",
+      "evidence": [
+        {
+          "video": "https://www.youtube.com/shorts/QRqU_eKdJVo?t=3",
+          "t": 3.03,
+          "note": "first hard cut"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/QRVVFB9TTAU?t=8",
+          "t": 8.2,
+          "note": "first hard cut"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/CtMIbPMMcxI?t=14",
+          "t": 14.13,
+          "note": "first hard cut"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/urDi5MNQ5kQ?t=6",
+          "t": 6.47,
+          "note": "first hard cut"
+        }
+      ]
+    },
+    {
+      "rule": "Speech runs at a median 2.5 words per second",
+      "kind": "measured",
+      "support": "12 of 12",
+      "evidence": []
+    },
+    {
+      "rule": "Burned-in captions are used",
+      "kind": "looked",
+      "support": "12 of 12",
+      "evidence": [
+        {
+          "video": "https://www.youtube.com/shorts/mzg0CX0mUgc?t=0",
+          "t": 0.4,
+          "note": "middle, yellow"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/QRqU_eKdJVo?t=0",
+          "t": 0.4,
+          "note": "bottom, white"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/8C3NzEEOvG0?t=0",
+          "t": 0.4,
+          "note": "middle, white"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/ThAo8zPk2cA?t=0",
+          "t": 0.4,
+          "note": "middle, white"
+        }
+      ]
+    },
+    {
+      "rule": "Captions show about 4 words at a time",
+      "kind": "looked",
+      "support": "12 of 12",
+      "evidence": []
+    },
+    {
+      "rule": "Captions sit at the middle",
+      "kind": "looked",
+      "support": "6 of 12",
+      "evidence": []
+    },
+    {
+      "rule": "The spoken word is highlighted",
+      "kind": "looked",
+      "support": "7 of 12",
+      "evidence": [
+        {
+          "video": "https://www.youtube.com/shorts/QRqU_eKdJVo?t=0",
+          "t": 0.4,
+          "note": "white"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/ThAo8zPk2cA?t=0",
+          "t": 0.4,
+          "note": "white"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/KCx2YD81ZQk?t=0",
+          "t": 0.4,
+          "note": "white"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/urDi5MNQ5kQ?t=0",
+          "t": 0.4,
+          "note": "white"
+        }
+      ]
+    },
+    {
+      "rule": "A large hook title is on screen from the first frame",
+      "kind": "looked",
+      "support": "12 of 12",
+      "evidence": [
+        {
+          "video": "https://www.youtube.com/shorts/mzg0CX0mUgc?t=0",
+          "t": 0.4,
+          "note": "top"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/QRqU_eKdJVo?t=0",
+          "t": 0.4,
+          "note": "middle"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/8C3NzEEOvG0?t=0",
+          "t": 0.4,
+          "note": "middle"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/ThAo8zPk2cA?t=0",
+          "t": 0.4,
+          "note": "middle"
+        }
+      ]
+    },
+    {
+      "rule": "Added logo graphics appear",
+      "kind": "looked",
+      "support": "12 of 12",
+      "evidence": [
+        {
+          "video": "https://www.youtube.com/shorts/mzg0CX0mUgc?t=0",
+          "t": 0.4,
+          "note": "logo"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/mzg0CX0mUgc?t=7",
+          "t": 7.16,
+          "note": "logo"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/mzg0CX0mUgc?t=14",
+          "t": 14.31,
+          "note": "logo"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/mzg0CX0mUgc?t=21",
+          "t": 21.46,
+          "note": "logo"
+        }
+      ]
+    },
+    {
+      "rule": "Added text banner graphics appear",
+      "kind": "looked",
+      "support": "4 of 12",
+      "evidence": [
+        {
+          "video": "https://www.youtube.com/shorts/QRqU_eKdJVo?t=0",
+          "t": 0.4,
+          "note": "text_banner"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/8C3NzEEOvG0?t=0",
+          "t": 0.4,
+          "note": "text_banner"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/QRVVFB9TTAU?t=0",
+          "t": 0.4,
+          "note": "text_banner"
+        },
+        {
+          "video": "https://www.youtube.com/shorts/KCx2YD81ZQk?t=0",
+          "t": 0.4,
+          "note": "text_banner"
+        }
+      ]
+    },
+    {
+      "rule": "Added other graphics appear",
+      "kind": "looked",
+      "support": "1 of 12",
+      "evidence": [
+        {
+          "video": "https://www.youtube.com/shorts/CtMIbPMMcxI?t=0",
+          "t": 0.4,
+          "note": "other"
+        }
+      ]
+    }
+  ],
+  "unsupported": [
+    "logo graphics are in the references; the renderer has no support for them yet",
+    "text_banner graphics are in the references; the renderer has no support for them yet",
+    "other graphics are in the references; the renderer has no support for them yet"
+  ],
+  "unknown": [
+    "Zoom and punch-in use in the references (frame sampling cannot tell a zoom from a camera move).",
+    "Music, sound effects and sound design (only loudness peaks were measured).",
+    "Which edits were made by the original creator and which were later additions."
+  ],
+  "style": {
+    "captions": {
+      "words_per_event": 4,
+      "margin_v": 780,
+      "highlight": "#FFE000",
+      "pop": true,
+      "color": "#FFFFFF",
+      "uppercase": true
+    },
+    "hook": {
+      "enabled": true
+    },
+    "zoom": {
+      "enabled": false,
+      "min_gap": 8.0,
+      "max_events": 2,
+      "scale": 1.1,
+      "seconds": 0.7
+    },
+    "cuts": {
+      "trim_lines": false
+    }
+  }
+}

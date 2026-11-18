@@ -1,31 +1,58 @@
 {% extends "base.html" %}{% block body %}
 <h1>Overview</h1>
-{% if waiting %}<div class="card"><a href="/ready" class="btn">{{ waiting }} clip{{ 's' if waiting != 1 }} waiting for review</a></div>{% endif %}
-<div class="card"><h2 style="margin-top:0;font-size:1.05rem">Runway</h2>
-<p><span class="big">{{ runway.ready }}</span> clip{{ 's' if runway.ready != 1 }} on hand ({{ runway.approved }} approved), {{ runway.cap }} posts a day.
-{% if runway.date %}<br>{{ runway.days }} day{{ 's' if runway.days != 1 }} to {{ runway.date }} = {{ runway.slots }} slots.
-{% if runway.short %}<span class="warn">{{ runway.short }} more clip{{ 's' if runway.short != 1 }} needed.</span>{% else %}<span class="ok">Covered.</span>{% endif %}{% endif %}</p>
-<div class="row" style="align-items:center">
-<form method="post" action="/autopilot"><input type="hidden" name="mode" value="{{ 'off' if autopilot_on else 'on' }}"><button class="ghost">Autopilot: {{ 'on' if autopilot_on else 'off' }} (switch {{ 'off' if autopilot_on else 'on' }})</button></form>
-<form method="post" action="/autopilot"><input type="hidden" name="mode" value="run"><button class="ghost">Run now</button></form>
-<form method="post" action="/warmup" style="display:flex;gap:.4rem"><input name="warmup_date" value="{{ runway.date or '' }}" placeholder="2026-11-19" style="width:9rem"><button class="ghost">Set date</button></form>
-</div></div>
+<div class="card"><h2>Needs you</h2>
+{% if waiting %}<a class="todo" href="/ready"><b>{{ waiting }}</b> clip{{ 's' if waiting != 1 }} to review <span class="go">Review</span></a>{% endif %}
+{% if to_submit %}<a class="todo" href="/posted"><b>{{ to_submit|length }}</b> posted link{{ 's' if to_submit|length != 1 }} not yet submitted to the campaign <span class="go">Submit</span></a>{% endif %}
+{% if failed %}<a class="todo" href="/queue"><b class="bad">{{ failed }}</b> job{{ 's' if failed != 1 }} failed in the last day <span class="go">Look</span></a>{% endif %}
+{% for a in alerts %}<a class="todo" href="/campaigns/{{ a.id }}"><b class="warn">!</b> {{ a.text }} <span class="go">Open</span></a>{% endfor %}
+{% if runway.short %}<div class="todo"><b class="warn">{{ runway.short }}</b> more clip{{ 's' if runway.short != 1 }} needed to fill every slot until {{ runway.date }}</div>{% endif %}
+{% if not (waiting or to_submit or failed or runway.short or alerts) %}<p class="mute" style="margin:0">Nothing right now.</p>{% endif %}
+<p class="mute" style="margin:.7rem 0 0">Next post: {{ next_post }}. {{ runway.approved }} approved clip{{ 's' if runway.approved != 1 }} queued, {{ runway.cap }} posts a day.</p>
+</div>
 <div class="grid">
 <div class="card"><div class="mute">Views today</div><div class="big">{{ '{:,}'.format(ov.views_today) }}</div></div>
-<div class="card"><div class="mute">Views 7 days</div><div class="big">{{ '{:,}'.format(ov.views_7d) }}</div></div>
-<div class="card"><div class="mute">Views 30 days</div><div class="big">{{ '{:,}'.format(ov.views_30d) }}</div></div>
+<div class="card"><div class="mute">Views, 7 days</div><div class="big">{{ '{:,}'.format(ov.views_7d) }}</div></div>
+<div class="card"><div class="mute">Views, 30 days</div><div class="big">{{ '{:,}'.format(ov.views_30d) }}</div></div>
 <div class="card"><div class="mute">Clips posted</div><div class="big">{{ ov.posted }}</div></div>
-<div class="card"><div class="mute">Approval rate</div><div class="big">{{ '%.0f%%'|format(ov.approval_rate * 100) if ov.approval_rate is not none else '-' }}</div></div>
+<div class="card"><div class="mute">Campaign approval</div><div class="big">{{ '%.0f%%'|format(ov.approval_rate * 100) if ov.approval_rate is not none else '-' }}</div></div>
 </div>
-<div class="card"><h2 style="margin-top:0;font-size:1.05rem">Earnings</h2>
+<div class="card"><h2>Views gained per day</h2>
+<div class="bars" role="img" aria-label="Views gained per day, last 14 days">{% for d in daily %}<div style="height:{{ d.pct }}%" title="{{ d.day }}: {{ '{:,}'.format(d.views) }} views"></div>{% endfor %}</div>
+<div class="axis"><span>{{ daily[0].day }}</span><span>{{ daily[(daily|length // 2)].day }}</span><span>{{ daily[-1].day }} (today)</span></div>
+</div>
+<div class="card"><h2>Where viewers are</h2>
+{% if geo.all %}
+<p style="margin:0 0 .7rem"><span class="big">{{ '%.0f'|format(geo.all.tier1 * 100) }}%</span> of {{ '{:,}'.format(geo.all.total) }} counted views came from Tier 1 countries (US, UK, Canada, Australia, New Zealand).</p>
+{% for g in geo.all.top %}<div class="geo"><span>{{ g.country }}</span><div class="track"><i class="{{ 't1' if g.tier1 }}" style="width:{{ g.pct }}%"></i></div><span class="num">{{ g.pct }}% <span class="mute">{{ '{:,}'.format(g.views) }}</span></span></div>{% endfor %}
+<p class="mute" style="margin-bottom:0">From YouTube Analytics, refreshed daily. It runs about three days behind the public view count and leaves out countries with very few views, so totals are lower than the tiles above. Per-clip splits appear once a clip has enough views.</p>
+{% elif geo.status == 'needs_consent' %}
+<p style="margin:0">ClipForge is not yet allowed to read viewer countries. Two steps, both yours:</p>
+<ol style="margin:.5rem 0"><li>In the Google Cloud project, enable the "YouTube Analytics API".</li>
+<li>Run <code>python -m clipforge youtube-auth</code> and approve the sign-in again. It now also asks to view analytics (read-only).</li></ol>
+<p class="mute" style="margin:0">Uploads keep working either way.</p>
+{% elif geo.status in ('ok', 'never') %}<p class="mute" style="margin:0">No country data yet. YouTube reports it a day or two after a clip is posted.</p>
+{% else %}<p class="mute" style="margin:0">Could not read viewer countries: {{ geo.status }}</p>{% endif %}
+</div>
+<div class="card"><h2>Top clips</h2>
+{% if ov.top %}{% for p in ov.top %}<div class="item">
+<img class="thumb" src="/clip/{{ p.clip_id }}/thumb" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+<div class="grow"><div class="title">{% if p.url %}<a href="{{ p.url }}" target="_blank" rel="noopener noreferrer">{{ p.title }}</a>{% else %}{{ p.title }}{% endif %}</div><div class="mute">Clip {{ p.clip_id }}, {{ p.campaign }}</div></div>
+<div class="num"><div class="big" style="font-size:1.15rem">{{ '{:,}'.format(p.views) }}</div><div class="mute">views</div></div>
+</div>{% endfor %}{% else %}<p class="mute">Nothing posted yet.</p>{% endif %}</div>
+<div class="card"><h2>Earnings</h2>
 <table>
 <tr><th></th><th>USD</th><th>LKR (about)</th></tr>
 <tr><td>Estimated, approved clips</td><td>${{ '%.2f'|format(ov.approved_usd) }}</td><td>{{ '{:,.0f}'.format(ov.approved_usd * ov.lkr_per_usd) }}</td></tr>
-<tr><td>Estimated, still pending</td><td>${{ '%.2f'|format(ov.pending_usd) }}</td><td>{{ '{:,.0f}'.format(ov.pending_usd * ov.lkr_per_usd) }}</td></tr>
+<tr><td>Estimated, awaiting review</td><td>${{ '%.2f'|format(ov.pending_usd) }}</td><td>{{ '{:,.0f}'.format(ov.pending_usd * ov.lkr_per_usd) }}</td></tr>
 <tr><td>Actual, recorded payouts</td><td>${{ '%.2f'|format(ov.actual_usd) }}</td><td>{{ '{:,.0f}'.format(ov.actual_usd * ov.lkr_per_usd) }}</td></tr>
 </table>
-<p class="mute">Estimates are views x rate, capped per clip, zero under the campaign's minimum views. The LKR rate is set on the Settings page.</p></div>
-<div class="card"><h2 style="margin-top:0;font-size:1.05rem">Top clips</h2>
-{% if ov.top %}<div class="scroll"><table>{% for p in ov.top %}<tr><td>Clip {{ p.clip_id }}</td><td>{{ '{:,}'.format(p.views) }} views</td><td><a href="{{ p.url }}" style="color:var(--accent)">{{ p.url }}</a></td></tr>{% endfor %}</table></div>
-{% else %}<p class="mute">Nothing posted yet.</p>{% endif %}</div>
+<p class="mute">Estimates are views x rate, capped per clip, zero under the campaign's minimum views.</p></div>
+<div class="card"><h2>Autopilot</h2>
+<p class="mute" style="margin-top:0">Finds footage, picks moments and makes clips. It never approves or posts.</p>
+{% for lv in live %}<p><span class="tag ok">Live now</span> <b>{{ lv.login }}</b> for {{ lv.campaign }}: reading chat (started {{ lv.ago }}),{{ '{:,}'.format(lv.messages) }} messages, {{ lv.moments }} reaction{{ '' if lv.moments == 1 else 's' }} sent for clipping.{% if not lv.vod %} <span class="mute">No VOD is being written yet, so nothing can be cut until there is one.</span>{% endif %}</p>{% endfor %}
+<div class="row">
+<form method="post" action="/autopilot"><input type="hidden" name="mode" value="{{ 'off' if autopilot_on else 'on' }}"><button class="ghost">Turn {{ 'off' if autopilot_on else 'on' }} (now {{ 'on' if autopilot_on else 'off' }})</button></form>
+<form method="post" action="/autopilot"><input type="hidden" name="mode" value="run"><button class="ghost">Run now</button></form>
+<form method="post" action="/warmup" style="display:flex;gap:.4rem"><input name="warmup_date" value="{{ runway.date or '' }}" placeholder="2026-11-19" style="width:9rem" aria-label="Fill slots until this date"><button class="ghost">Set target date</button></form>
+</div></div>
 {% endblock %}

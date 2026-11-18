@@ -6,7 +6,27 @@
 {% if k.budget_left is not none %} &middot; ${{ '{:,.0f}'.format(k.budget_left) }} left{% endif %}
 {% if k.deadline %} &middot; ends {{ k.deadline }}{% endif %}</p>
 {% if k.brief_url %}<a href="{{ k.brief_url }}" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">Campaign page</a>{% endif %}
+{% if k.status == 'active' %}
+<form method="post" action="/campaigns/{{ k.id }}/hold" onsubmit="return confirm('Leave this campaign? Autopilot stops sourcing and clipping it, and it drops out of the posting queue. Nothing already posted changes.')">
+<button class="danger">Leave campaign</button></form>
+{% elif k.status == 'skipped' and k.joined_at %}
+<form method="post" action="/campaigns/{{ k.id }}/resume"><button class="ghost">Rejoin campaign</button></form>
+{% endif %}
 </div>
+{% if budget and budget.warn %}<div class="card warn"><b>{{ budget.warn }}.</b> Clips posted now may not be paid if the money is gone before their views are counted.</div>{% endif %}
+{% if rules %}<div class="card"><h2>What the brief requires</h2>
+<table>
+{% if rules.min_tier1_share or rules.audience_requirements %}<tr><td>Viewers</td><td>{% if rules.min_tier1_share %}At least {{ '%.0f'|format(rules.min_tier1_share * 100) }}% from Tier 1 countries{% if geo %} (yours so far: {{ '%.0f'|format(geo.tier1 * 100) }}%){% endif %}. {% endif %}{{ rules.audience_requirements or '' }}</td></tr>{% endif %}
+{% if rules.clip_min_seconds or rules.clip_max_seconds %}<tr><td>Clip length</td><td>{{ '%g'|format(rules.clip_min_seconds or 0) }} to {{ '%g'|format(rules.clip_max_seconds) if rules.clip_max_seconds else 'any' }} seconds</td></tr>{% endif %}
+{% if rules.min_views %}<tr><td>Minimum views to earn</td><td>{{ '{:,}'.format(rules.min_views) }}</td></tr>{% endif %}
+{% if rules.required_hashtags or rules.required_mentions %}<tr><td>Must be in the text</td><td>{{ (rules.required_hashtags + rules.required_mentions)|join(' ') }}</td></tr>{% endif %}
+{% if rules.required_overlay %}<tr><td>Must be on screen</td><td>{{ rules.required_overlay }}</td></tr>{% endif %}
+{% if rules.banned_edits %}<tr><td>Banned edits</td><td>{{ rules.banned_edits|join('; ') }}</td></tr>{% endif %}
+{% if rules.banned_content %}<tr><td>Banned content</td><td>{{ rules.banned_content|join('; ') }}</td></tr>{% endif %}
+{% if rules.country_restrictions %}<tr><td>Clipper countries</td><td>{{ rules.country_restrictions|join(', ') }}</td></tr>{% endif %}
+{% if rules.pre_approval %}<tr><td>Before posting</td><td>The campaign team must approve a draft</td></tr>{% endif %}
+{% if rules.uncertain %}<tr><td>Unclear in the brief</td><td>{% for u in rules.uncertain %}{{ u }}<br>{% endfor %}</td></tr>{% endif %}
+</table></div>{% endif %}
 {% if not k.brief_text %}
 <form method="post" action="/campaigns/{{ k.id }}/brief" class="card">
 <h2 style="margin-top:0;font-size:1.05rem">Add the brief</h2>

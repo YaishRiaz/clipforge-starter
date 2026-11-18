@@ -1,0 +1,19 @@
+{
+  "name": "streamer",
+  "version": 1,
+  "note": "Starting weights, same set as `general` (no streamer-specific view data yet). Split into its own file so it re-weights from streamer campaigns' own posts only, instead of being pooled with every other niche. Re-weighted from our own clips' view counts once there are enough (PRD section 6).",
+  "categories": [
+    {"id": "setup_payoff", "weight": 1.0, "description": "A clear setup followed by a payoff inside the clip."},
+    {"id": "surprise", "weight": 1.0, "description": "Something unexpected happens that the viewer could not predict."},
+    {"id": "conflict", "weight": 0.9, "description": "Disagreement, rivalry or tension between people."},
+    {"id": "big_reaction", "weight": 0.9, "description": "A loud or visible reaction: shouting, laughter, shock."},
+    {"id": "quotable_line", "weight": 0.8, "description": "One line people would repeat or comment."},
+    {"id": "stakes_early", "weight": 1.1, "description": "What is at risk is stated in the first three seconds."}
+  ],
+  "penalties": [
+    {"id": "needs_context", "weight": -1.0, "description": "Makes no sense without the rest of the stream."},
+    {"id": "slow_start", "weight": -0.8, "description": "Nothing happens in the first three seconds."},
+    {"id": "no_payoff", "weight": -1.0, "description": "Ends before the moment resolves."},
+    {"id": "other_streamers_focus", "weight": -1.0, "description": "The moment is mostly about another streamer, which most briefs ban."}
+  ]
+}

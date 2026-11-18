@@ -1,13 +1,16 @@
 {% extends "base.html" %}{% block body %}
 <h1>Learn</h1>
+<p class="mute">Each niche has its own rubric: which moment types score highest when picking what to clip. A type moves only after {{ min_posts }} of our own posts older than {{ settle }} hours, and at least two types need that, so a few lucky clips cannot rewrite it.</p>
+{% for nc in niches %}
 <div class="card scroll">
-<p class="mute">Rubric version {{ version }}. {{ total }} post{{ 's' if total != 1 }} so far. A moment type moves only after {{ min_posts }} posts older than {{ settle }} hours, and at least two types need that, so a few lucky clips cannot rewrite it.</p>
+<h2 style="margin:0 0 .3rem;font-size:1.05rem">{{ nc.niche|capitalize }} <span class="mute" style="font-size:.85rem;font-weight:400">version {{ nc.version }} &middot; {{ nc.posts }} settled post{{ 's' if nc.posts != 1 }}</span></h2>
 <table>
 <tr><th>Moment type</th><th>Weight now</th><th>Our posts</th><th>Median views</th><th>Proposed</th></tr>
-{% for r in changes %}<tr><td>{{ r.id }}</td><td>{{ '%.2f'|format(r.old) }}</td><td>{{ r.n }}</td><td>{{ '{:,}'.format(r.median_views) if r.median_views is not none else '-' }}</td><td>{% if r.new != r.old %}<b class="{{ 'ok' if r.new > r.old else 'warn' }}">{{ '%.2f'|format(r.new) }}</b>{% else %}<span class="mute">same</span>{% endif %}</td></tr>{% endfor %}
+{% for r in nc.changes %}<tr><td>{{ r.id }}</td><td>{{ '%.2f'|format(r.old) }}</td><td>{{ r.n }}</td><td>{{ '{:,}'.format(r.median_views) if r.median_views is not none else '-' }}</td><td>{% if r.new != r.old %}<b class="{{ 'ok' if r.new > r.old else 'warn' }}">{{ '%.2f'|format(r.new) }}</b>{% else %}<span class="mute">same</span>{% endif %}</td></tr>{% endfor %}
 </table>
-{% if movable %}<form method="post" action="/learn/apply"><button>Apply proposed weights</button></form>
+{% if nc.movable %}<form method="post" action="/learn/{{ nc.niche }}/apply"><button>Apply proposed weights</button></form>
 <p class="mute">The old file is kept next to it, so this can be undone.</p>
-{% else %}<p class="mute">Nothing to propose yet. Weights now come from top GTA Shorts, and re-weight from our own clips once there are enough views.</p>{% endif %}
+{% else %}<p class="mute">Nothing to propose yet for {{ nc.niche }}.</p>{% endif %}
 </div>
+{% endfor %}
 {% endblock %}

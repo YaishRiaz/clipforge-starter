@@ -1,0 +1,15 @@
+{
+  "niche": "trailer",
+  "status": "active",
+  "source": "prior",
+  "evidence": [],
+  "notes": "Official trailers are shown whole and are never zoomed or cut.",
+  "style": {
+    "captions": {
+      "enabled": true
+    },
+    "zoom": {
+      "enabled": false
+    }
+  }
+}

@@ -129,6 +129,14 @@ def test_no_category_falls_back_to_general():
     assert rubric_mod.for_campaign(REPO / "rubrics", None).name == "general"
 
 
+def test_streamer_and_minecraft_have_their_own_rubric_now():
+    assert rubric_mod.niche_of(REPO / "rubrics", "Streamer") == "streamer"
+    assert rubric_mod.niche_of(REPO / "rubrics", "Minecraft") == "minecraft"
+    assert rubric_mod.niche_of(REPO / "rubrics", "cooking") == "general"
+    assert rubric_mod.for_campaign(REPO / "rubrics", "Streamer").name == "streamer"
+    assert rubric_mod.for_campaign(REPO / "rubrics", "Minecraft").name == "minecraft"
+
+
 # --- windows ----------------------------------------------------------------
 
 def test_a_window_surrounds_its_peak():

@@ -12,7 +12,7 @@ Everything here is done by you, on your own accounts. Budget about an hour, most
 ## 1. Get the code and install
 
 ```
-git clone <the repo link you were sent>
+git clone https://github.com/YaishRiaz/clipforge-starter.git clipforge
 cd clipforge
 ```
 
@@ -69,7 +69,40 @@ While the consent screen is in "Testing" the token lasts **7 days**; if uploads 
 4. `parse-brief <id>`, then open the campaign page and **check the parsed rules** against the brief. Correct anything wrong (`campaign-rules <id>`).
 5. Only footage the brief names is ingested. A creator's whole channel is only taken if you approve it with `campaign-rules <id> --add-channel <url>`.
 
-Brief-specific things (an overlay with the streamer's handle, required hashtags, a facecam) are enforced by the compliance check. If the brief wants a facecam, add that creator's layout file (README, "Facecam layouts").
+Brief-specific things are enforced by the compliance check: an overlay with the streamer's handle, required hashtags, a creator's name, a disclosure line, a facecam. Check these rules on the campaign page:
+
+- **Time windows** (`source_windows`): only part of a VOD is approved ("from 45:50 onwards").
+- **Footage start and game** (`footage_after`, `footage_games`): only a given day's stream, or only a given game. The live watcher and the channel scan skip everything else.
+- **Opening time** (`post_from`): nothing posts before the campaign opens.
+- **Paid promotion** (`paid_promotion`): uploads get YouTube's "includes paid promotion" label.
+
+The facecam is found automatically for Twitch and Kick footage. A `layouts/<creator>.json` box is only needed to pin an exact position.
+
+## 5b. Live streams (Twitch and Kick)
+
+When a channel a campaign approves goes live, `serve` notices within two minutes:
+
+- **Twitch:** chat is read anonymously, without an account. A burst of reactions becomes a moment, cut from the VOD being written.
+- **Kick:** chat is not read. Kick only offers it through its developer API, which needs an app on your Kick account. The stream is taken in 20-minute stretches instead, and each is scored on loudness and speech rate.
+
+When the stream ends, the whole VOD is mined as usual. The number of live clips per stream is a setting on the dashboard (default 4).
+
+## 5c. Edit style: taste books and rubrics
+
+- `python -m clipforge taste-build <niche>` watches the top Shorts of a niche and writes a **draft** taste book with evidence. It measures font, size, colours, words per caption, banner, emoji, zoom and pace.
+- Books for a streamer (`streamer-<name>`) or a game (`game-<name>`) are built automatically for footage you clip, at most two a day. Each build costs about 650 YouTube API units.
+- Drafts arrive in Telegram with **Read / Approve / Reject** buttons. Nothing is used until you approve it.
+- At clip time the books are layered (niche, then game, then streamer), and then the brief removes anything it bans.
+- Reaction emoji come from `assets/emoji` (Twemoji, CC-BY 4.0). They are already in the repository; `emoji-fetch` downloads them again if missing.
+
+## 5d. Priority campaigns
+
+From release day, a campaign that names GTA VI posts before everything else and its jobs run first. Two kv keys control this:
+
+- `priority_gta6_from` moves the start time.
+- `campaign_priority_<id>` set to `1` or `0` forces any campaign on or off.
+
+Use it for any launch where early clips get the views.
 
 ## 6. Run it
 

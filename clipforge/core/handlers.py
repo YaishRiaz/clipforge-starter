@@ -296,8 +296,26 @@ def stage_transcribe(ctx: Ctx) -> None:
     # A persistent work dir: chunk checkpoints have to outlive a crash or a
     # rate limit, or a 35-request transcription restarts from zero.
     work = ctx.settings.data_dir / "work" / f"transcribe-{row['id']}"
+    heard, shift = path, 0.0
+    from ..ingest import briefs as briefs_mod
+
+    rules = briefs_mod.load_rules(ctx.conn, row["campaign_id"])
+    win = rules.window_for(row["url"]) if rules else None
+    if win:
+        # The brief approves only part of this video: listen to that part alone, which also
+        # saves most of the transcription quota on a long stream. Times are shifted back after.
+        from ..core import media
+
+        shift = win[0]
+        heard = work / "window.m4a"
+        work.mkdir(parents=True, exist_ok=True)
+        if not heard.is_file():
+            end = min(win[1], row["duration"] or win[1]) if win[1] else (row["duration"] or None)
+            cut = ["-ss", f"{shift:.2f}"] + (["-t", f"{end - shift:.2f}"] if end else [])
+            media.run([media._tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", *cut,
+                       "-i", str(path), "-vn", "-c:a", "aac", "-b:a", "64k", "-ac", "1", str(heard)])
     try:
-        segments, backend = tr.transcribe(path, ctx.settings, work_dir=work,
+        segments, backend = tr.transcribe(heard, ctx.settings, work_dir=work,
                                           beat=ctx.beat)
     except tr.TranscriptionUnavailable as exc:
         # A missing key or backend needs a human, not three more attempts.
@@ -307,6 +325,8 @@ def stage_transcribe(ctx: Ctx) -> None:
         sources.hold(ctx.conn, row["id"],
                      "transcription produced nothing; is there speech in this audio?")
         return
+    if shift:
+        segments = [caps.Segment(s.start + shift, s.end + shift, s.text) for s in segments]
     caps.save(segments, dest, source=backend)
     ctx.conn.execute("UPDATE sources SET transcript_path=? WHERE id=?",
                      (str(dest), row["id"]))
@@ -353,6 +373,48 @@ def _peaks_path(ctx: Ctx, source_id: int):
     return ctx.settings.data_dir / "signals" / f"{source_id}.json"
 
 
+def _chat_peaks(ctx: Ctx, row) -> list:
+    """Where the stream's chat reacted. Only Twitch VODs have chat to read; any failure is no signal."""
+    from ..moments import chat
+
+    vod = chat.vod_id(row["url"])
+    if vod is None or not row["duration"]:
+        return []
+    try:
+        msgs = chat.fetch(vod, ctx.settings.data_dir / "chat" / f"{row['id']}.json",
+                         duration=row["duration"], beat=ctx.beat)
+        found = chat.find_peaks(msgs, row["duration"])
+    except Exception as exc:
+        from ..ingest import live
+
+        kept = live.chat_log(ctx.settings, row["url"])
+        if not kept.is_file():
+            log.warning("source %s: no chat signal (%s)", row["id"], exc)
+            return []
+        msgs = chat.load(kept)                 # read while the stream was live
+        found = chat.find_peaks(msgs, row["duration"])
+    log.info("source %s: %d chat message(s), %d reaction burst(s)", row["id"], len(msgs), len(found))
+    return found
+
+
+MAX_SCENE_SCAN_PIXELS = 3_800_000          # about 1440p; a 4K file decodes slower than real time here
+
+
+def _cheap_to_scan(path) -> bool:
+    """Scene changes need every frame decoded. Past 1440p this laptop cannot keep up, and the
+    loudness, speech and chat signals carry a talking video well enough without them."""
+    from ..core import media
+
+    try:
+        p = media.probe(path)
+    except Exception:
+        return True
+    if (p.width or 0) * (p.height or 0) > MAX_SCENE_SCAN_PIXELS:
+        log.info("%s is %dx%d: skipping the scene-change scan", path.name, p.width, p.height)
+        return False
+    return True
+
+
 def stage_signals(ctx: Ctx) -> None:
     """Loudness, speech rate and scene changes, then the peaks worth reading."""
     import json
@@ -376,18 +438,20 @@ def stage_signals(ctx: Ctx) -> None:
         rate = sig.speech_rate_series(segments, duration=row["duration"])
         found += sig.peaks(rate, z=1.8, min_gap=20.0, top_n=20)
 
-    if row["media_kind"] == "video":
+    if row["media_kind"] == "video" and _cheap_to_scan(path):
         ctx.beat()
-        changes = sig.scene_change_times(path)
+        changes = sig.scene_change_times(path, beat=ctx.beat)
         if changes and row["duration"]:
             density = sig.density(changes, window=10.0, duration=row["duration"])
             found += sig.peaks(density, z=2.0, min_gap=20.0, top_n=20)
 
+    found += _chat_peaks(ctx, row)
+
     found.sort(key=lambda p: p.start)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(
-        [{"start": p.start, "end": p.end, "value": p.value, "z": p.z, "signal": p.signal}
-         for p in found], indent=1), encoding="utf-8")
+        [{"start": p.start, "end": p.end, "value": p.value, "z": p.z, "signal": p.signal,
+          "note": p.note} for p in found], indent=1), encoding="utf-8")
     log.info("source %s: %d peak(s) across the signals", row["id"], len(found))
 
 
@@ -446,7 +510,7 @@ def stage_score(ctx: Ctx) -> None:
     if row["status"] == "held" or not row["transcript_path"]:
         return
     existing = ctx.conn.execute(
-        "SELECT COUNT(*) AS n FROM moments WHERE source_id=?", (row["id"],)
+        "SELECT COUNT(*) AS n FROM moments WHERE source_id=? AND live=0", (row["id"],)
     ).fetchone()["n"]
     if existing:
         return                      # an earlier run of this stage
@@ -459,8 +523,19 @@ def stage_score(ctx: Ctx) -> None:
     segments = caps.load(row["transcript_path"])
     campaign = sources.campaign_of(ctx.conn, row["id"])
     rules = briefs.load_rules(ctx.conn, row["campaign_id"])
-    rubric = rubric_mod.for_campaign(
-        ctx.settings.rubrics_dir, campaign["category"] if campaign else None)
+    if rules is not None and rules.window_for(row["url"]):
+        peaks = [p for p in peaks if rules.inside_window(row["url"], p.start, p.end)]
+    from ..taste import subjects
+
+    info = subjects.of_source(ctx.conn, row)
+    lo, hi = 0.0, float(row["duration"] or 0)
+    win = rules.window_for(row["url"]) if rules else None
+    if win:
+        lo, hi = win[0], win[1] or hi
+    main_game = subjects.game_at(info["games"], lo, hi or 1e9)
+    rubric = rubric_mod.for_subjects(
+        ctx.settings.rubrics_dir, campaign["category"] if campaign else None,
+        subjects.streamer_key(info.get("streamer")), subjects.game_key(main_game))
 
     ctx.beat()
     try:
@@ -474,6 +549,25 @@ def stage_score(ctx: Ctx) -> None:
 
     if not chosen:
         chosen = _short_official_cuts(row, rules, score_mod)
+    if rules is not None and rules.source_windows:
+        inside = [c for c in chosen if rules.inside_window(row["url"], c.start, c.end)]
+        if len(inside) != len(chosen):
+            log.info("source %s: %d moment(s) outside the brief's allowed stretch were dropped",
+                     row["id"], len(chosen) - len(inside))
+        chosen = inside
+
+    from ..ingest import live as live_mod
+    from ..moments import chat as chat_mod
+
+    # Moments already clipped while the stream was live are not offered twice.
+    early = ctx.conn.execute('SELECT start, "end" FROM moments WHERE source_id=? AND live=1',
+                             (row["id"],)).fetchall()
+    chosen = [c for c in chosen
+              if not any(live_mod._overlaps(c.start, c.end, e["start"], e["end"]) for e in early)]
+
+    chat_peaks = [p for p in peaks if p.signal == "chat"]
+    if chat_peaks and chat_mod.boost(chosen, chat_peaks):
+        log.info("source %s: chat reacted to some of the moments; their scores were raised", row["id"])
 
     # PRD section 6 step 5: keep the top N. A five-hour stream can yield dozens
     # of passable moments, and posting is capped at 3-8 a day, so the rest are
@@ -485,15 +579,25 @@ def stage_score(ctx: Ctx) -> None:
         status = "candidate" if rank < keep else "dropped"
         ctx.conn.execute(
             'INSERT INTO moments (source_id, start, "end", description, hook, title, '
-            "score, rubric_category, status) VALUES (?,?,?,?,?,?,?,?,?)",
+            "score, rubric_category, status, game) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (row["id"], item.start, item.end, item.candidate.description,
              item.candidate.hook, item.candidate.title, item.score,
-             item.rubric_category, status),
+             item.rubric_category, status, subjects.game_at(info["games"], item.start, item.end)),
         )
     sources.mark(ctx.conn, row["id"], "mined")
     log.info("source %s: %d moment(s) found, best %d kept, top score %.1f",
              row["id"], len(ranked), min(keep, len(ranked)),
              max((c.score for c in ranked), default=0.0))
+
+
+def stage_live_moment(ctx: Ctx) -> None:
+    """A burst of live chat: listen to that stretch of the stream and clip what is there."""
+    from ..ingest import live
+
+    live.make_moment(ctx.conn, ctx.settings, ctx.payload, beat=ctx.beat)
+
+
+register("live_moment", [("find", stage_live_moment)])
 
 
 register("mine_source", [
@@ -566,6 +670,9 @@ def stage_clip_fetch(ctx: Ctx) -> None:
     else:
         start, end = cut.snap(segments, moment["start"], moment["end"], min_seconds=min_s)
 
+    if rules is not None and not rules.inside_window(source["url"], start, end):
+        return _block_clip(ctx, work, "the brief only approves part of this video, and this moment is outside it")
+
     local = Path(source["path"]) if source["path"] else None
     if local is not None and local.is_file() and media.probe(local).has_video:
         plan = {"start": start, "end": end, "offset": 0.0, "footage": str(local), "keep": True}
@@ -588,12 +695,137 @@ def stage_clip_fetch(ctx: Ctx) -> None:
     (work / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
 
 
+def _clip_style(ctx: Ctx, work, campaign, moment, rules, lay):
+    """This clip's edit style: the niche's taste book, then the brief takes things away.
+
+    A taste-book failure must never stop a clip, so any problem falls back to the plain default.
+    """
+    import json
+
+    from ..taste import book as book_mod
+    from ..taste import style as style_mod
+
+    try:
+        niche_book = book_mod.for_clip(ctx.conn, campaign, moment)
+        resolved = style_mod.resolve(niche_book, rules, fit=lay.fit or lay.game_full)
+    except Exception as exc:
+        log.warning("taste book unusable for moment %s, using the plain style: %s", ctx.ref_id, exc)
+        resolved = style_mod.resolve(None, rules, fit=lay.fit or lay.game_full)
+    (work / "style.json").write_text(resolved.model_dump_json(indent=2), encoding="utf-8")
+    return resolved
+
+
+def _clip_zooms(ctx: Ctx, work, plan, duration, st) -> list:
+    """Punch-in moments from the clip's own audio; empty when zoom is off or cannot be measured."""
+    from pathlib import Path
+
+    from ..core import media
+    from ..edit import words as words_mod
+    from ..taste import zoom as zoom_mod
+
+    if not st.zoom.enabled:
+        return []
+    try:
+        audio = work / "clip-audio.flac"
+        if not audio.is_file():
+            ss = max(0.0, plan["start"] - plan["offset"])
+            words_mod.extract_audio(Path(plan["footage"]), ss=ss, duration=duration, dest=audio)
+        return zoom_mod.plan(audio, duration, st.zoom)
+    except (media.MediaError, OSError) as exc:
+        log.warning("zoom skipped for moment %s: %s", ctx.ref_id, exc)
+        return []
+
+
+def _clip_layout(ctx: Ctx, work, moment, source, campaign, plan, *, search: bool):
+    """The creator's layout, corrected for where the camera is in THIS stretch of footage.
+
+    A streamer moves the webcam between streams and scenes, so the layout file's box is only a
+    first guess. The search result is kept in the work dir; `search=False` only reads it.
+    """
+    import json
+    from dataclasses import replace
+    from pathlib import Path
+
+    from ..edit import camfind
+    from ..edit import layout as layout_mod
+    from ..edit.layout import Box
+
+    produced = campaign["platform"] != "own" and not layout_mod.is_stream(source["url"])
+    from . import db as db_mod
+
+    game_full = db_mod.kv_get(ctx.conn, f"layout_full_{campaign['id']}") == "1"
+    lay = layout_mod.for_moment(source["creator"] or campaign["creator"], moment, campaign["id"],
+                                produced=produced, game_full=game_full)
+    # A stream nearly always has a facecam somewhere, so it is looked for even when the
+    # streamer has no saved layout yet; other footage is searched only when its layout says so.
+    if lay.fit or (lay.facecam is None and not lay.facecam_required
+                   and not layout_mod.is_stream(source["url"])):
+        return lay
+    cache = work / "camfind.json"
+    got = None
+    if cache.is_file():
+        got = json.loads(cache.read_text(encoding="utf-8"))
+    elif search:
+        override = work / "override.json"
+        wide = override.is_file() and bool(json.loads(override.read_text(encoding="utf-8")).get("recam"))
+        d = camfind.locate(Path(plan["footage"]), ss=max(0.0, plan["start"] - plan["offset"]),
+                           duration=plan["end"] - plan["start"], settings=ctx.settings, work=work,
+                           known=lay.facecam, points=camfind.WIDE_POINTS if wide else camfind.POINTS)
+        got = {"kind": d.kind, "box": list(d.box.__dict__.values()) if d.box else None, "note": d.note}
+        if d.kind != "unknown":
+            cache.write_text(json.dumps(got), encoding="utf-8")
+    if not got or got["kind"] == "unknown":
+        return lay
+    if got["kind"] == "overlay" and got["box"]:
+        return replace(lay, facecam=Box(*got["box"]), cam_note=got["note"])
+    if got["kind"] == "full_screen":
+        return replace(lay, facecam=None, cam_full=True, cam_note=got["note"])
+    return replace(lay, facecam=None, cam_note="no facecam is visible in this part of the stream")
+
+
+def _clip_tighten(ctx: Ctx, work, plan, words, duration, ss, rules):
+    """Jump cuts when the style asks for them: (words, duration, footage, ss, plan) on the new clock.
+
+    Filler lines and long silences are cut out of the footage into work/tight.mkv; the choice is
+    kept in work/cuts.json so a rerun cuts the same way. Any failure leaves the clip uncut.
+    """
+    import json
+    from pathlib import Path
+
+    from ..core import media
+    from ..taste import lines as lines_mod
+
+    same = (words, duration, Path(plan["footage"]), ss, plan)
+    try:
+        f = work / "cuts.json"
+        if f.is_file():
+            keep = json.loads(f.read_text(encoding="utf-8")).get("keep")
+        else:
+            lo = rules.clip_min_seconds if rules and rules.clip_min_seconds else 5.0
+            keep = lines_mod.plan(words, duration, ctx.settings, min_seconds=lo)
+            kept = sum(e - s for s, e in keep) if keep else duration
+            f.write_text(json.dumps({"keep": keep, "removed_seconds": round(duration - kept, 2)}), encoding="utf-8")
+        if not keep:
+            return same
+        tight = work / "tight.mkv"
+        if not tight.is_file():
+            ctx.beat()
+            part = work / "tight.partial.mkv"
+            lines_mod.render_tight(Path(plan["footage"]), ss=ss, keep=keep, dest=part)
+            part.replace(tight)
+        (work / "clip-audio.flac").unlink(missing_ok=True)     # zoom peaks must be measured on the cut audio
+        return (lines_mod.remap(words, keep), sum(e - s for s, e in keep), tight, 0.0,
+                {**plan, "footage": str(tight), "start": 0.0, "offset": 0.0})
+    except (media.MediaError, OSError, ValueError) as exc:
+        log.warning("jump cuts skipped for moment %s: %s", ctx.ref_id, exc)
+        return same
+
+
 def stage_clip_render(ctx: Ctx) -> None:
     """Burn the hook, captions and handle into the vertical frame."""
     import json
     from pathlib import Path
 
-    from ..edit import layout as layout_mod
     from ..edit import meta as meta_mod
     from ..edit import render, subs
     from ..edit import words as words_mod
@@ -606,7 +838,7 @@ def stage_clip_render(ctx: Ctx) -> None:
     moment, source, campaign = _moment_ctx(ctx)
     plan = json.loads((work / "plan.json").read_text(encoding="utf-8"))
     rules = briefs.load_rules(ctx.conn, source["campaign_id"])
-    lay = layout_mod.for_moment(source["creator"] or campaign["creator"], moment, campaign["id"])
+    lay = _clip_layout(ctx, work, moment, source, campaign, plan, search=True)
     start, end = plan["start"], plan["end"]
     duration = end - start
 
@@ -617,19 +849,47 @@ def stage_clip_render(ctx: Ctx) -> None:
     if words is None:
         words = subs.words_in_window(segments, start, end)
     handle = meta_mod.handle_from(rules, lay.handle)
+    resolved = _clip_style(ctx, work, campaign, moment, rules, lay)
+    st = resolved.style
+    if lay.game_bottom:
+        st.captions.margin_v = max(60, min(st.captions.margin_v, subs.OUT_H - lay.game_bottom - 420))
+    burned = subs.has_burned_subs(plan["footage"])
+    footage = Path(plan["footage"])
+    if st.cuts.trim_lines and words and not burned:
+        words, duration, footage, ss, plan = _clip_tighten(ctx, work, plan, words, duration, ss, rules)
     ass = subs.build_ass(hook=moment["hook"] or "", handle=handle,
-                         events=[] if subs.has_burned_subs(plan["footage"]) else subs.caption_events(words),
+                         events=[] if burned else subs.caption_events(words, st.captions.words_per_event),
                          duration=duration,
-                         cam_height=lay.cam_height)
+                         cam_height=lay.cam_height, style=st, words=None if burned else words,
+                         fit=lay.fit, game_bottom=lay.game_bottom)
     ass_path = work / "subs.ass"
     ass_path.write_text(ass, encoding="utf-8")
     (work / "words.txt").write_text(" ".join(w[2] for w in words), encoding="utf-8")
 
     ctx.beat()
+    zooms = _clip_zooms(ctx, work, plan, duration, st)
     tmp = work / "clip.partial.mp4"
-    render.render(Path(plan["footage"]), ss=ss,
-                  duration=duration, layout=lay, ass_path=ass_path, dest=tmp)
+    pops = []
+    if st.emoji.enabled and words and not burned:
+        from ..edit import emoji as emoji_mod
+
+        # Beside the caption line (margin_v up from the bottom), at the right edge.
+        pops = emoji_mod.pick(words, max_events=st.emoji.max_events, duration=duration)
+        (work / "emoji.json").write_text(json.dumps([[p.name, p.start] for p in pops]), encoding="utf-8")
+    render.render(footage, ss=ss,
+                  duration=duration, layout=lay, ass_path=ass_path, dest=tmp,
+                  zooms=zooms, zoom_scale=st.zoom.scale,
+                  pops=pops, pop_y=max(80, subs.OUT_H - st.captions.margin_v - 160))
     tmp.replace(work / "clip.mp4")
+
+
+def _streamer_of(ctx: Ctx, source) -> str | None:
+    try:
+        from ..taste import subjects
+
+        return subjects.of_source(ctx.conn, source).get("streamer") or source["creator"]
+    except Exception:  # noqa: BLE001 - a credit line must never stop a clip
+        return source["creator"]
 
 
 def stage_clip_finish(ctx: Ctx) -> None:
@@ -640,7 +900,6 @@ def stage_clip_finish(ctx: Ctx) -> None:
 
     from ..core import media
     from ..edit import compliance
-    from ..edit import layout as layout_mod
     from ..edit import meta as meta_mod
     from ..edit import package, render
     from ..ingest import briefs
@@ -657,19 +916,27 @@ def stage_clip_finish(ctx: Ctx) -> None:
 
     plan = json.loads((work / "plan.json").read_text(encoding="utf-8"))
     rules = briefs.load_rules(ctx.conn, source["campaign_id"])
-    lay = layout_mod.for_moment(source["creator"] or campaign["creator"], moment, campaign["id"])
+    lay = _clip_layout(ctx, work, moment, source, campaign, plan, search=False)
     words_file = work / "words.txt"
     spoken = words_file.read_text(encoding="utf-8") if words_file.is_file() else ""
 
     ctx.beat()
-    fields = meta_mod.finish(meta_mod.draft(moment, spoken, settings=ctx.settings),
-                             rules=rules, handle=meta_mod.handle_from(rules, lay.handle))
+    fields = meta_mod.finish(meta_mod.draft(moment, spoken, settings=ctx.settings,
+                                          creator=source["creator"] or campaign["creator"], rules=rules),
+                             rules=rules, handle=meta_mod.handle_from(rules, lay.handle),
+                             credit=meta_mod.stream_credit(source["url"], _streamer_of(ctx, source)))
     probe = media.probe(work / "clip.mp4")
     findings = compliance.check(
         rules=rules, layout=lay, meta=fields, duration=probe.duration, width=probe.width,
         height=probe.height, has_audio=probe.has_audio, overlay_burned=bool(fields["handle"]) or bool(lay.logo),
         hook=moment["hook"] or "", spoken=spoken,
         cam_blank=render.cam_band_blank(work / "clip.mp4", lay))
+    from ..edit import framecheck
+
+    ctx.beat()
+    seen = framecheck.check(work / "clip.mp4", settings=ctx.settings, work=work,
+                            cam_expected=lay.facecam is not None and not lay.fit)
+    findings += [compliance.Finding("WARN", "frame_check", f"{s}; look at the clip before approving") for s in seen]
     ok, notes = compliance.summary(findings)
 
     ctx.conn.execute("DELETE FROM clips WHERE moment_id=? AND path IS NULL", (ctx.ref_id,))
@@ -685,6 +952,14 @@ def stage_clip_finish(ctx: Ctx) -> None:
             "source_start": plan["start"], "source_end": plan["end"],
             "duration": round(probe.duration, 2), "score": moment["score"],
             "hook": moment["hook"], "compliance": [str(f) for f in findings]}
+    style_file = work / "style.json"
+    if style_file.is_file():
+        meta["taste"] = json.loads(style_file.read_text(encoding="utf-8"))
+    cuts_file = work / "cuts.json"
+    if cuts_file.is_file():
+        cut = json.loads(cuts_file.read_text(encoding="utf-8"))
+        if cut.get("keep"):
+            meta["jump_cuts"] = {"removed_seconds": cut.get("removed_seconds"), "parts": len(cut["keep"])}
     zip_path = package.write(dest, clip=dest / "clip.mp4", thumb=dest / "thumb.jpg", meta=meta)
     ctx.conn.execute(
         "UPDATE clips SET path=?, thumb_path=?, package_path=?, meta_json=? WHERE id=?",
@@ -719,3 +994,34 @@ def _publish_stage(name: str):
 
 
 register("publish_clip", [(n, _publish_stage(n)) for n in ("upload", "record", "verify")])
+
+
+# --------------------------------------------------------------------------
+# Taste book: watch a niche's top Shorts and write a draft book
+# --------------------------------------------------------------------------
+
+def stage_taste_build(ctx: Ctx) -> None:
+    from ..taste import build
+
+    niche = str(ctx.payload.get("niche") or "").strip()
+    if not niche:
+        raise ValueError("taste_build needs a niche in its payload")
+    queries = tuple(ctx.payload.get("queries") or ()) or None
+    build.build(ctx.settings, niche, beat=ctx.beat, queries=queries)
+    subject = ctx.payload.get("subject")
+    if subject and queries:
+        # The same subject's rubric: which kinds of moment its top Shorts are, weighted by
+        # views. Written as a draft; approving the taste book makes both live.
+        from ..moments import rubric_build
+
+        try:
+            rubric_build.build(ctx.settings.rubrics_dir / f"{niche}.draft.json", ctx.settings,
+                               queries=queries, subject=subject, name=niche,
+                               base=ctx.settings.rubrics_dir / "general.json")
+        except Exception as exc:
+            log.warning("rubric for %s not built: %s", niche, exc)
+    # The Telegram bot announces the draft, with Read / Approve / Reject buttons.
+    log.info("taste book draft for %s is ready", niche)
+
+
+register("taste_build", [("build", stage_taste_build)])

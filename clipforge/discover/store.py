@@ -84,6 +84,18 @@ def refresh(conn: sqlite3.Connection, *,
         "WHERE state != 'joined' AND EXISTS (SELECT 1 FROM campaigns k "
         "WHERE k.external_id=discovered.external_id "
         "AND k.joined_at IS NOT NULL)")
+    # Joined campaigns: keep their budget current and remember each change, so the
+    # dashboard can warn before one runs dry.
+    conn.execute(
+        "UPDATE campaigns SET budget_left=(SELECT d.budget_left FROM discovered d "
+        "WHERE d.campaign_id=campaigns.id AND d.budget_left IS NOT NULL) "
+        "WHERE EXISTS (SELECT 1 FROM discovered d WHERE d.campaign_id=campaigns.id "
+        "AND d.budget_left IS NOT NULL)")
+    conn.execute(
+        "INSERT INTO budget_log (discovered_id, budget_left) SELECT d.id, d.budget_left "
+        "FROM discovered d WHERE d.campaign_id IS NOT NULL AND d.budget_left IS NOT NULL "
+        "AND d.budget_left IS NOT (SELECT b.budget_left FROM budget_log b "
+        "WHERE b.discovered_id=d.id ORDER BY b.captured_at DESC, b.rowid DESC LIMIT 1)")
     if report["seen"]:
         db.kv_set(conn, KV_REFRESHED, conn.execute("SELECT datetime('now')").fetchone()[0])
     return report

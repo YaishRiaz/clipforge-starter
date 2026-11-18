@@ -9,8 +9,10 @@
 <label for="a">Auto-mode score threshold (0-100)</label><input id="a" name="auto_threshold" value="{{ values.auto_threshold }}">
 <label for="c">Posts per day (1-8)</label><input id="c" name="daily_cap" value="{{ values.daily_cap }}">
 <label for="t">Posting times, comma separated</label><input id="t" name="post_times" value="{{ values.post_times }}">
+<label for="pt">Best-clip times: these slots post the highest-scoring clip, the others the lowest (leave empty to always post the best)</label><input id="pt" name="prime_times" value="{{ values.prime_times }}">
+<label for="lc">Clips to make while an approved streamer is live, from chat reactions (0 turns live watching off)</label><input id="lc" name="live_clips" value="{{ values.live_clips }}">
 <label for="l">LKR per USD (for the estimate display)</label><input id="l" name="lkr_per_usd" value="{{ values.lkr_per_usd }}">
 <div class="row"><button>Save</button></div>
 </form>
-<p class="mute">Nothing posts yet; these are read by the publishing phase. Disk floor: {{ disk_floor }} GB (set in .env).</p></div>
+<p class="mute">Times are this laptop's clock (Colombo). 07:00, 09:00 and 11:00 are the US evening. Disk floor: {{ disk_floor }} GB (set in .env).</p></div>
 {% endblock %}

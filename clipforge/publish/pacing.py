@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta
 
-START_PER_DAY = 5
+START_PER_DAY = 7
 
 
 def parse_times(text: str) -> list[time]:
@@ -21,7 +21,7 @@ def parse_times(text: str) -> list[time]:
 
 
 def effective_cap(setting: int, ceiling: int, first_post: datetime | None, now: datetime) -> int:
-    """Start at 5 a day (the YouTube upload quota allows about 6), add one per full week since the first post, never above
+    """Start at 7 a day (7 slots, 2 h apart, 07:00-19:00), add one per full week since the first post, never above
     the dashboard setting or the hard ceiling."""
     weeks = 0 if first_post is None else max(0, (now - first_post).days // 7)
     return max(1, min(setting, ceiling, START_PER_DAY + weeks))
@@ -43,6 +43,12 @@ def is_due(now: datetime, times: list[time], cap: int, posted: list[datetime],
     return last is None or now - last >= timedelta(hours=min_gap_hours)
 
 
+def current_slot(now: datetime, times: list[time]) -> time | None:
+    """The posting time whose turn it is: the latest one already passed today."""
+    passed = [t for t in times if datetime.combine(now.date(), t) <= now]
+    return max(passed, default=None)
+
+
 def next_slot(now: datetime, times: list[time], cap: int, posted: list[datetime],
               min_gap_hours: float) -> datetime | None:
     """The next moment `is_due` will turn true (an approximation for display)."""
@@ -52,8 +58,10 @@ def next_slot(now: datetime, times: list[time], cap: int, posted: list[datetime]
     last = max(posted, default=None)
     slots = _slots(now, times, cap)
     for i, s in enumerate(slots):
-        if i >= len(today) and s >= now:
-            return max(s, last + timedelta(hours=min_gap_hours)) if last else s
+        if i >= len(today):
+            # A slot that passed unused is still owed: `is_due` posts it as soon as the gap allows.
+            at = max(s, now)
+            return max(at, last + timedelta(hours=min_gap_hours)) if last else at
     if len(slots) > len(today) and slots and slots[-1] <= now:
         return now if is_due(now, times, cap, posted, min_gap_hours) else (
             last + timedelta(hours=min_gap_hours) if last else now)

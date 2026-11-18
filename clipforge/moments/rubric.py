@@ -108,14 +108,45 @@ def load(path: Path) -> Rubric:
     )
 
 
+def niche_of(rubrics_dir: Path, category: str | None) -> str:
+    """The rubric file a campaign's category resolves to, falling back to `general`."""
+    if category and (Path(rubrics_dir) / f"{category.strip().lower()}.json").is_file():
+        return category.strip().lower()
+    return "general"
+
+
+def combine(rubrics: list[Rubric]) -> Rubric:
+    """One rubric from several: each category weighted by the mean of the rubrics that have it."""
+    if len(rubrics) == 1:
+        return rubrics[0]
+
+    def blend(groups):
+        seen: dict[str, list] = {}
+        for items in groups:
+            for c in items:
+                seen.setdefault(c.id, []).append(c)
+        return tuple(Category(i, round(sum(c.weight for c in cs) / len(cs), 3), cs[0].description)
+                     for i, cs in seen.items())
+
+    return Rubric(name=" + ".join(r.name for r in rubrics), version=1,
+                  categories=blend(r.categories for r in rubrics),
+                  penalties=blend(r.penalties for r in rubrics))
+
+
+def for_subjects(rubrics_dir: Path, category: str | None, *keys: str | None) -> Rubric:
+    """The campaign's niche rubric blended with any approved streamer or game rubric."""
+    found = [for_campaign(rubrics_dir, category)]
+    for key in keys:
+        path = Path(rubrics_dir) / f"{key}.json" if key else None
+        if path is not None and path.is_file():
+            try:
+                found.append(load(path))
+            except RubricError as exc:
+                log.warning("rubric %s unusable: %s", key, exc)
+    return combine(found)
+
+
 @lru_cache(maxsize=8)
 def for_campaign(rubrics_dir: Path, category: str | None) -> Rubric:
-    """The rubric for a campaign's niche, falling back to `general`.
-
-    A niche without its own file (anything but `gta` so far) uses the general one.
-    """
-    if category:
-        candidate = Path(rubrics_dir) / f"{category.strip().lower()}.json"
-        if candidate.is_file():
-            return load(candidate)
-    return load(Path(rubrics_dir) / "general.json")
+    """The rubric for a campaign's niche, falling back to `general`."""
+    return load(Path(rubrics_dir) / f"{niche_of(rubrics_dir, category)}.json")

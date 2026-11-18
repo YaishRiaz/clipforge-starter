@@ -472,6 +472,54 @@ def _requeue_clip(conn, moment_id: int) -> None:
     marker.unlink(missing_ok=True)
 
 
+def cmd_taste_build(args: argparse.Namespace) -> int:
+    from .taste import book, build
+
+    niche = book.slug(args.niche)
+    if args.now:
+        settings, _ = _conn()
+        data = build.build(settings, niche, n=args.n, beat=lambda: print(".", end="", flush=True))
+        print()
+        print(build.summary(niche, data))
+        return 0
+    _, conn = _conn()
+    job_id = queue.enqueue(conn, "taste_build", payload={"niche": niche}, priority=-5, dedupe=False)
+    print(f"queued taste_build job {job_id} for '{niche}'; the worker watches the references, "
+          "then Telegram says when the draft is ready")
+    return 0
+
+
+def cmd_taste_approve(args: argparse.Namespace) -> int:
+    from .taste import book
+
+    try:
+        live = book.approve_with_rubric(args.niche, get_settings().rubrics_dir)
+    except FileNotFoundError:
+        print(f"no taste book or draft for '{args.niche}'", file=sys.stderr)
+        return 2
+    print(" and ".join(live) + " now live; new clips use it")
+    return 0
+
+
+def cmd_emoji_fetch(_: argparse.Namespace) -> int:
+    from .edit import emoji
+
+    n = emoji.fetch()
+    print(f"{n} emoji fetched; {len(emoji.SET)} in {emoji.emoji_dir()} (Twemoji, CC-BY 4.0)")
+    return 0
+
+
+def cmd_taste_show(_: argparse.Namespace) -> int:
+    from .taste import book
+
+    for path in sorted(book.books_dir().glob("*.json")):
+        if path.stem.endswith(".prior"):
+            continue
+        data = json.loads(path.read_text(encoding="utf-8"))
+        print(f"{path.stem:28} {data.get('status', 'active'):7} {data.get('source', '?')}")
+    return 0
+
+
 def cmd_rubric_build(args: argparse.Namespace) -> int:
     from .moments import rubric_build
 
@@ -552,6 +600,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
                     _, alerts = collect.collect(conn, settings)
                     for a in alerts:
                         tg.send(settings, a)
+                if collect.geo_due(conn):
+                    collect.collect_geo(conn, settings)
                 tg.poll_once(conn, settings)
             except Exception as exc:                 # keep the bot alive; never log the token
                 log.warning("telegram loop: %s", type(exc).__name__ if not isinstance(
@@ -563,6 +613,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print("telegram bot running")
     else:
         print("telegram bot off (no token/chat id, or --no-bot)")
+    if not args.no_bot:
+        from .ingest import live
+
+        threading.Thread(target=live.Watcher(settings).run, daemon=True, name="live").start()
     print(f"dashboard: http://localhost:{settings.dashboard_port}   phone (same Wi-Fi): "
           f"{tg.lan_address(settings)}")
     uvicorn.run(app, host=settings.dashboard_host, port=settings.dashboard_port,
@@ -677,6 +731,12 @@ def cmd_stats_collect(_: argparse.Namespace) -> int:
     print(f"{n} video(s) updated")
     for a in alerts:
         print("ALERT:", a)
+    g = collect.collect_geo(conn, settings)
+    status = db.kv_get(conn, "geo_status", "")
+    print(f"viewer countries: {g} video(s) updated ({status})")
+    if status == "needs_consent":
+        print("  run: python -m clipforge youtube-auth   (and enable the YouTube Analytics API "
+              "in the Google Cloud project)")
     return 0
 
 
@@ -767,7 +827,7 @@ def cmd_rubric_reweight(args: argparse.Namespace) -> int:
     _, conn = _conn()
     path = settings.rubrics_dir / f"{args.niche}.json"
     rub = rubric_mod.load(path)
-    perf = reweight.own_views(conn)
+    perf = reweight.own_views(conn, niche=args.niche, rubrics_dir=settings.rubrics_dir)
     changes = reweight.propose(rub, perf)
     for c in changes:
         views = f"n={c.n} median={c.median_views:,}" if c.n else "no posts"
@@ -926,6 +986,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("niche", nargs="?", default="gta")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(fn=cmd_rubric_reweight)
+
+    p = sub.add_parser("taste-build", help="watch a niche's top Shorts and write a draft taste book")
+    p.add_argument("niche")
+    p.add_argument("--n", type=int, default=12, help="how many Shorts to watch")
+    p.add_argument("--now", action="store_true", help="run here instead of queueing for the worker")
+    p.set_defaults(fn=cmd_taste_build)
+
+    p = sub.add_parser("taste-approve", help="make a niche's draft taste book live")
+    p.add_argument("niche")
+    p.set_defaults(fn=cmd_taste_approve)
+
+    sub.add_parser("taste-show", help="list taste books and their status").set_defaults(fn=cmd_taste_show)
+    sub.add_parser("emoji-fetch", help="download the reaction emoji set (Twemoji) once"
+                   ).set_defaults(fn=cmd_emoji_fetch)
 
     p = sub.add_parser("rubric-build", help="re-weight a niche rubric from top YouTube Shorts")
     p.add_argument("niche", nargs="?", default="gta")

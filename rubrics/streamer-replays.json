@@ -1,0 +1,64 @@
+{
+  "name": "streamer-replays",
+  "version": 1,
+  "note": "Weights for types seen in titles come from median views of 117 top Replays Shorts (YouTube Data API, 17 Nov 2026); a type with fewer than 5 matches keeps its earlier weight, and setup_payoff/stakes_early are hand-set. Views favour big channels, so treat this as a prior and re-weight from our own clips' views.",
+  "evidence": {
+    "big_reaction": {
+      "n": 35,
+      "median_views": 128740
+    },
+    "surprise": {
+      "n": 10,
+      "median_views": 57456
+    }
+  },
+  "categories": [
+    {
+      "id": "setup_payoff",
+      "weight": 1.0,
+      "description": "A clear setup followed by a payoff inside the clip."
+    },
+    {
+      "id": "surprise",
+      "weight": 0.87,
+      "description": "Something unexpected happens that the viewer could not predict."
+    },
+    {
+      "id": "conflict",
+      "weight": 0.9,
+      "description": "Disagreement, rivalry or tension between people."
+    },
+    {
+      "id": "big_reaction",
+      "weight": 1.2,
+      "description": "A loud or visible reaction: shouting, laughter, shock."
+    },
+    {
+      "id": "quotable_line",
+      "weight": 0.8,
+      "description": "One line people would repeat or comment."
+    },
+    {
+      "id": "stakes_early",
+      "weight": 1.1,
+      "description": "What is at risk is stated in the first three seconds."
+    }
+  ],
+  "penalties": [
+    {
+      "id": "needs_context",
+      "weight": -1.0,
+      "description": "Makes no sense without the rest of the video."
+    },
+    {
+      "id": "slow_start",
+      "weight": -0.8,
+      "description": "Nothing happens in the first three seconds."
+    },
+    {
+      "id": "no_payoff",
+      "weight": -1.0,
+      "description": "Ends before the moment resolves."
+    }
+  ]
+}

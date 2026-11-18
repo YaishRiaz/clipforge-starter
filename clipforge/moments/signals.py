@@ -176,20 +176,41 @@ _SHOWINFO_TIME = re.compile(r"pts_time:([0-9.]+)")
 
 
 def scene_change_times(src: Path, *, threshold: float = 0.4,
-                       timeout: float = 14400) -> list[float]:
-    """Seconds at which the picture changes sharply. Video sources only."""
+                       timeout: float = 14400, beat=None) -> list[float]:
+    """Seconds at which the picture changes sharply. Video sources only.
+
+    The picture is shrunk to 320 px first (a cut is just as visible, and a 4K hour would take
+    far longer than the worker may go without a heartbeat); `beat` is called while ffmpeg runs.
+    """
     probe = media.probe(src)
     if not probe.has_video:
         log.info("%s has no video track, so no scene changes", src.name)
         return []
-    proc = subprocess.run([
-        media._tool("ffmpeg"), "-hide_banner", "-nostats",
+    import tempfile
+    import time
+
+    with tempfile.TemporaryFile() as err:
+        proc = subprocess.Popen([
+            media._tool("ffmpeg"), "-hide_banner", "-nostats",
         "-i", str(src),
-        "-filter_complex", f"select='gt(scene,{threshold})',showinfo",
-        "-an", "-f", "null", "-",
-    ], capture_output=True, text=True, timeout=timeout)
+            "-vf", f"scale=320:-2,select='gt(scene,{threshold})',showinfo",
+            "-an", "-f", "null", "-",
+        ], stdout=subprocess.DEVNULL, stderr=err)
+        t0 = time.monotonic()
+        while True:
+            try:
+                proc.wait(timeout=20)
+                break
+            except subprocess.TimeoutExpired:
+                if time.monotonic() - t0 > timeout:
+                    proc.kill()
+                    raise
+                if beat:
+                    beat()
+        err.seek(0)
+        text = err.read().decode("utf-8", "replace")
     # showinfo writes to stderr; a non-zero exit with output is still usable.
-    found = [float(m) for m in _SHOWINFO_TIME.findall(proc.stderr or "")]
+    found = [float(m) for m in _SHOWINFO_TIME.findall(text)]
     log.info("scene changes: %d above %.2f in %s", len(found), threshold, src.name)
     return sorted(found)
 
@@ -212,6 +233,7 @@ class Peak:
     value: float
     z: float
     signal: str
+    note: str = ""
 
 
 def threshold_for(signal: Signal, z: float) -> float | None:

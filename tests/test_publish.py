@@ -30,9 +30,9 @@ def test_parse_times_sorts_and_ignores_blanks():
 
 def test_cap_ramps_one_per_week_and_respects_limits():
     first = at(9)
-    assert pacing.effective_cap(8, 8, None, at(9)) == 5
-    assert pacing.effective_cap(8, 8, first, first + timedelta(days=6)) == 5
-    assert pacing.effective_cap(8, 8, first, first + timedelta(days=15)) == 7
+    assert pacing.effective_cap(8, 8, None, at(9)) == 7
+    assert pacing.effective_cap(8, 8, first, first + timedelta(days=6)) == 7
+    assert pacing.effective_cap(8, 8, first, first + timedelta(days=15)) == 8
     assert pacing.effective_cap(4, 8, first, first + timedelta(days=60)) == 4
     assert pacing.effective_cap(8, 6, first, first + timedelta(days=60)) == 6
     assert pacing.effective_cap(0, 8, None, at(9)) == 1
@@ -66,6 +66,14 @@ def test_next_slot_today_tomorrow_and_none():
     assert pacing.next_slot(at(11), T, 3, [at(10, 5)], 3) == at(14)
     assert pacing.next_slot(at(19), T, 3, [at(10), at(14), at(18)], 3) == at(10, day=11)
     assert pacing.next_slot(at(9), [], 3, [], 3) is None
+
+
+def test_next_slot_shows_a_missed_slot_as_soon_as_the_gap_allows():
+    times = pacing.parse_times("07:00,09:00,11:00,17:00,19:00,21:30")
+    posted = [at(7, 30), at(9, 52), at(11, 52), at(17, 19)]
+    now = at(19, 14)
+    assert pacing.next_slot(now, times, 7, posted, 2) == at(19, 19)
+    assert not pacing.is_due(now, times, 7, posted, 2) and pacing.is_due(at(19, 19), times, 7, posted, 2)
 
 
 # ---- fixtures ---------------------------------------------------------------
@@ -540,3 +548,110 @@ def test_phase_5_needs_the_oauth_settings():
     missing = get_settings().missing_for(5)
     for name in ("YOUTUBE_OAUTH_CLIENT_ID", "YOUTUBE_OAUTH_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN"):
         assert name in missing
+
+
+def test_a_failed_upload_is_tried_again_after_an_hour_but_not_a_third_time(env, tmp_path):
+    settings, conn = env
+    add_clip(conn, tmp_path, 1)
+    jid = queue.enqueue(conn, flow.JOB, 1)
+    conn.execute("UPDATE jobs SET status='failed' WHERE id=?", (jid,))
+    conn.execute("UPDATE jobs SET updated_at = updated_at - ?", (flow.RETRY_AFTER + 60,))
+    assert [r["id"] for r in flow.candidates(conn)] == [1]
+    second = queue.enqueue(conn, flow.JOB, 1)
+    conn.execute("UPDATE jobs SET status='failed', updated_at = updated_at - ?", (flow.RETRY_AFTER + 60,))
+    assert flow.candidates(conn) == []
+
+
+# ---- viewer geography ---------------------------------------------------------
+
+class _Resp:
+    def __init__(self, status, body):
+        self.status_code, self._body = status, body
+        self.headers = {"content-type": "application/json"}
+
+    def json(self):
+        return self._body
+
+
+def test_views_by_country_asks_for_one_video_and_reads_the_rows():
+    seen = {}
+
+    def get(url, **kw):
+        seen.update(url=url, **kw)
+        return _Resp(200, {"rows": [["US", 60], ["lk", 40]]})
+
+    got = youtube.views_by_country("tok", "abc", "2026-11-13", "2026-11-16", get=get)
+    assert got == {"US": 60, "LK": 40}
+    assert seen["url"] == youtube.REPORTS_URL and seen["params"]["filters"] == "video==abc"
+    assert seen["params"]["dimensions"] == "country" and seen["params"]["ids"] == "channel==MINE"
+    youtube.views_by_country("tok", None, "a", "b", get=get)
+    assert "filters" not in seen["params"]
+    assert youtube.views_by_country("t", "abc", "a", "b", get=lambda u, **k: _Resp(200, {})) == {}
+
+
+def test_a_sign_in_without_the_analytics_scope_is_reported_not_raised(env, tmp_path):
+    settings, conn = env
+    make_post(conn, tmp_path)
+
+    def get(url, **kw):
+        return _Resp(403, {"error": {"errors": [{"reason": "insufficientPermissions"}]}})
+
+    fetch = lambda tok, vid, a, b: youtube.views_by_country(tok, vid, a, b, get=get)
+    assert collect.collect_geo(conn, settings, fetch=fetch, token="t") == 0
+    assert db.kv_get(conn, "geo_status") == "needs_consent"
+    assert not collect.geo_due(conn) and collect.geo_due(conn, now=9e12)
+    assert "yt-analytics.readonly" in youtube.SCOPE and "youtube.upload" in youtube.SCOPE
+
+
+def test_geography_is_stored_and_summarised_with_the_tier1_share(env, tmp_path):
+    from clipforge.app import stats_view
+
+    settings, conn = env
+    make_post(conn, tmp_path)
+    data = {"US": 30, "LK": 60, "GB": 10}
+    assert collect.collect_geo(conn, settings, fetch=lambda *a: data, token="t") == 1
+    assert json.loads(db.kv_get(conn, "geo_channel")) == data
+    assert collect.collect_geo(conn, settings, fetch=lambda *a: {}, token="t") == 0      # lagging: keep old
+    g = stats_view.geo(conn)
+    assert g["status"] == "ok" and g["all"]["total"] == 100
+    assert abs(g["all"]["tier1"] - 0.4) < 1e-9 and g["all"]["top"][0]["country"] == "LK"
+    assert list(g["posts"].values())[0]["tier1"] == g["campaigns"][1]["tier1"]
+    assert stats_view.geo_summary([]) is None
+
+
+def test_prime_slots_post_the_best_clip_and_other_slots_the_weakest(env, tmp_path):
+    settings, conn = env
+    for cid, score in ((1, 40), (2, 90), (3, 60)):
+        add_clip(conn, tmp_path, cid, score=score)
+    db.kv_set(conn, "setting_post_times", "07:00,13:00")
+    db.kv_set(conn, "setting_prime_times", "07:00")
+    assert flow.tick(conn, settings, at(7, 1)) == 2                # US evening: the best
+    conn.execute("DELETE FROM jobs")
+    assert flow.tick(conn, settings, at(13, 1)) == 1               # off-peak: the weakest
+    conn.execute("DELETE FROM jobs")
+    db.kv_set(conn, "setting_prime_times", "")
+    assert flow.tick(conn, settings, at(13, 1)) == 2               # no prime times: best first
+    assert pacing.current_slot(at(6), pacing.parse_times("07:00")) is None
+
+
+def test_the_plan_shows_the_order_and_slots_and_yaish_can_reorder_it(env, tmp_path):
+    settings, conn = env
+    for cid, score in ((1, 40), (2, 90), (3, 60)):
+        add_clip(conn, tmp_path, cid, score=score)
+    db.kv_set(conn, "setting_post_times", "07:00,13:00")
+    db.kv_set(conn, "setting_prime_times", "07:00")
+    db.kv_set(conn, "setting_daily_cap", "2")
+    got = flow.plan(conn, settings, at(6))
+    assert [p["clip_id"] for p in got] == [2, 1, 3]            # prime: best, off-peak: weakest, then next day
+    assert [p["at"] for p in got] == [at(7), at(13), at(7, day=11)]
+    assert got[0]["prime"] and not got[1]["prime"] and not any(p["manual"] for p in got)
+
+    flow.reorder(conn, settings, 3, "top", at(6))
+    assert [p["clip_id"] for p in flow.plan(conn, settings, at(6))] == [3, 2, 1]
+    flow.reorder(conn, settings, 1, "up", at(6))
+    assert [p["clip_id"] for p in flow.plan(conn, settings, at(6))] == [3, 1, 2]
+    assert flow.tick(conn, settings, at(13, 1)) == 3           # the manual order beats the off-peak rule
+    with pytest.raises(ValueError):
+        flow.reorder(conn, settings, 99, "up", at(6))
+    flow.reset_order(conn)
+    assert [p["clip_id"] for p in flow.plan(conn, settings, at(6))] == [2, 1, 3]

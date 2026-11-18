@@ -53,11 +53,13 @@ def task_xml(command: str, workdir: str, user: str) -> str:
 
 
 def power_commands() -> list[list[str]]:
-    """Never sleep, hibernate or react to the lid while on mains power."""
+    """Never sleep, hibernate or react to the lid or the power and sleep buttons on mains power."""
     return [
         ["powercfg", "/change", "standby-timeout-ac", "0"],
         ["powercfg", "/change", "hibernate-timeout-ac", "0"],
         ["powercfg", "/setacvalueindex", "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION", "0"],
+        ["powercfg", "/setacvalueindex", "SCHEME_CURRENT", "SUB_BUTTONS", "PBUTTONACTION", "0"],
+        ["powercfg", "/setacvalueindex", "SCHEME_CURRENT", "SUB_BUTTONS", "SBUTTONACTION", "0"],
         ["powercfg", "/setactive", "SCHEME_CURRENT"],
     ]
 

@@ -38,6 +38,10 @@ def _active_job(conn: sqlite3.Connection, job_type: str, ref_id: int) -> bool:
         (job_type, ref_id)).fetchone() is not None
 
 
+RETRY_AFTER = 6 * 3600     # a failed make_clip (an outage, a rate limit) is tried again after this long
+MAX_TRIES = 2              # ...but a moment that failed this many times is left alone
+
+
 def clips_waiting(conn: sqlite3.Connection) -> int:
     made = conn.execute(
         "SELECT COUNT(*) FROM clips c WHERE c.status IN ('ready','approved') "
@@ -95,6 +99,13 @@ def run(conn: sqlite3.Connection, settings: Settings, *, lister=channel.list_vod
     except Exception as exc:                          # discovery never blocks clipping
         log.warning("discover pass failed: %s", type(exc).__name__)
 
+    try:
+        from ..taste import build as taste_build
+
+        out["taste_builds"] = len(taste_build.queue_missing(conn, settings))
+    except Exception as exc:                          # a missing book never blocks clipping
+        log.warning("taste build queue failed: %s", type(exc).__name__)
+
     for row in conn.execute(
             "SELECT id FROM campaigns WHERE status='active' AND joined_at IS NOT NULL "
             "AND platform != 'own'").fetchall():
@@ -110,7 +121,7 @@ def run(conn: sqlite3.Connection, settings: Settings, *, lister=channel.list_vod
             "SELECT s.id FROM sources s JOIN campaigns k ON k.id=s.campaign_id "
             "WHERE s.status IN ('tagged','downloaded') AND s.path IS NOT NULL "
             "AND k.status='active' AND k.joined_at IS NOT NULL "
-            "AND NOT EXISTS (SELECT 1 FROM moments m WHERE m.source_id=s.id) "
+            "AND NOT EXISTS (SELECT 1 FROM moments m WHERE m.source_id=s.id AND m.live=0) "
             "AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.type='mine_source' AND j.ref_id=s.id "
             "                AND j.status='failed') "
             "ORDER BY s.id").fetchall():
@@ -129,9 +140,13 @@ def run(conn: sqlite3.Connection, settings: Settings, *, lister=channel.list_vod
                 "JOIN campaigns k ON k.id=s.campaign_id "
                 "WHERE m.status='candidate' AND k.status='active' AND k.joined_at IS NOT NULL "
                 "AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.type='make_clip' AND j.ref_id=m.id "
-                "                AND j.status IN ('queued','running','failed')) "
+                "                AND (j.status IN ('queued','running') "
+                "                     OR (j.status='failed' AND j.updated_at > ?))) "
+                "AND (SELECT COUNT(*) FROM jobs j WHERE j.type='make_clip' AND j.ref_id=m.id "
+                "     AND j.status='failed') < ? "
                 "AND NOT EXISTS (SELECT 1 FROM clips c WHERE c.moment_id=m.id) "
-                "ORDER BY m.score DESC, m.id LIMIT ?", (deficit,)).fetchall():
+                "ORDER BY m.score DESC, m.id LIMIT ?",
+                (time.time() - RETRY_AFTER, MAX_TRIES, deficit)).fetchall():
             queue.enqueue(conn, "make_clip", ref_id=row["id"])
             out["clipping"] += 1
 

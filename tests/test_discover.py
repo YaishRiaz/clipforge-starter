@@ -234,7 +234,8 @@ def test_campaign_page_channel_approval(client):
 
 def test_overview_autopilot_and_warmup_controls(client):
     c, conn = client
-    assert "Runway" in c.get("/").text
+    home = c.get("/").text
+    assert "Needs you" in home and "Autopilot" in home and "Next post" in home
     c.post("/autopilot", data={"mode": "off"})
     assert not autopilot.enabled(conn)
     c.post("/autopilot", data={"mode": "on"})
@@ -253,3 +254,18 @@ def test_refresh_links_campaigns_joined_by_hand(env):
     store.refresh(conn, fetch=fetch)
     row = conn.execute("SELECT state, campaign_id FROM discovered WHERE external_id='aaa'").fetchone()
     assert (row["state"], row["campaign_id"]) == ("joined", cid)
+
+
+def test_refresh_logs_a_joined_campaigns_budget_only_when_it_changes(env):
+    _, conn = env
+    cid = int(conn.execute(
+        "INSERT INTO campaigns (platform, external_id, name, status, joined_at) "
+        "VALUES ('whop','aaa','Joined earlier','active',datetime('now'))").lastrowid)
+    store.refresh(conn, fetch=fetch)
+    store.refresh(conn, fetch=fetch)                                   # links it, then logs once
+    store.refresh(conn, fetch=fetch)
+    left = conn.execute("SELECT budget_left FROM discovered WHERE external_id='aaa'").fetchone()[0]
+    logged = [r[0] for r in conn.execute("SELECT budget_left FROM budget_log")]
+    assert (logged == [left]) if left is not None else (logged == [])
+    if left is not None:
+        assert conn.execute("SELECT budget_left FROM campaigns WHERE id=?", (cid,)).fetchone()[0] == left

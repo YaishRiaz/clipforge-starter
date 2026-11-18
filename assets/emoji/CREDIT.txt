@@ -1,0 +1,1 @@
+Emoji graphics: Twemoji 15.1.0 (https://github.com/jdecked/twemoji), Copyright 2019 Twitter, Inc and other contributors, licensed under CC-BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Used unmodified, scaled.

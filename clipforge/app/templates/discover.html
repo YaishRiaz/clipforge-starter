@@ -1,42 +1,43 @@
 {% extends "base.html" %}{% block body %}
 <h1>Find campaigns</h1>
-<form method="get" action="/discover" class="card">
-<div class="grid">
-<div><label>Platform</label><select name="source">
-<option value="">All</option>
-<option value="contentrewards" {{ 'selected' if f.source == 'contentrewards' }}>Content Rewards</option>
-<option value="vyro" {{ 'selected' if f.source == 'vyro' }}>Vyro</option></select></div>
-<div><label>Min rate ($ per 1K)</label><input name="min_rate" inputmode="decimal" value="{{ f.min_rate or '' }}"></div>
-<div><label>Min budget left ($)</label><input name="min_budget" inputmode="decimal" value="{{ f.min_budget or '' }}"></div>
-<div><label>Search</label><input name="text" value="{{ f.text }}" placeholder="gta, stream..."></div>
-<div><label>Sort</label><select name="sort">
+<form method="get" action="/discover" class="card" style="padding:.8rem 1rem">
+<input type="hidden" name="f" value="1">
+<div class="filter">
+<input name="text" value="{{ f.text }}" placeholder="Search: gta, stream..." aria-label="Search">
+<select name="sort" aria-label="Sort">
 {% for key,name in [('rate','Highest rate'),('budget','Most budget'),('new','Newest'),('seen','Recently seen')] %}
-<option value="{{ key }}" {{ 'selected' if f.sort == key }}>{{ name }}</option>{% endfor %}</select></div>
-<div><label>Show</label><select name="state">
+<option value="{{ key }}" {{ 'selected' if f.sort == key }}>{{ name }}</option>{% endfor %}</select>
+<label><input type="checkbox" name="gaming" value="1" {{ 'checked' if f.gaming }}> Gaming only</label>
+<button>Apply</button>
+</div>
+<details {{ 'open' if f.source or f.min_rate or f.min_budget or f.state or f.hide_application or not f.youtube }}><summary>More filters</summary>
+<div class="filter" style="margin-top:.6rem">
+<select name="source" aria-label="Platform">
+<option value="">All platforms</option>
+<option value="contentrewards" {{ 'selected' if f.source == 'contentrewards' }}>Content Rewards</option>
+<option value="vyro" {{ 'selected' if f.source == 'vyro' }}>Vyro</option></select>
+<input name="min_rate" inputmode="decimal" value="{{ f.min_rate or '' }}" placeholder="Min $ per 1K" aria-label="Minimum rate">
+<input name="min_budget" inputmode="decimal" value="{{ f.min_budget or '' }}" placeholder="Min budget left $" aria-label="Minimum budget left">
+<select name="state" aria-label="Show">
 <option value="">Not hidden</option>
 <option value="watching" {{ 'selected' if f.state == 'watching' }}>Watching</option>
 <option value="hidden" {{ 'selected' if f.state == 'hidden' }}>Hidden</option>
-<option value="joined" {{ 'selected' if f.state == 'joined' }}>Joined</option></select></div>
+<option value="joined" {{ 'selected' if f.state == 'joined' }}>Joined</option></select>
+<label><input type="checkbox" name="youtube" value="1" {{ 'checked' if f.youtube }}> Allows YouTube</label>
+<label><input type="checkbox" name="hide_application" value="1" {{ 'checked' if f.hide_application }}> Hide "apply first"</label>
+</div></details>
+</form>
+<div class="row" style="margin:0 0 1rem">
+<form method="post" action="/discover/refresh"><button class="ghost small">Refresh now</button></form>
+<span class="mute">{{ rows|length }} shown of {{ total }} open. Last refreshed {{ refreshed or 'never' }} (UTC), then every 3 hours.</span>
 </div>
-<div class="row" style="align-items:center">
-<label style="margin:0"><input type="checkbox" name="gaming" value="1" style="width:auto" {{ 'checked' if f.gaming }}> Gaming only</label>
-<label style="margin:0"><input type="checkbox" name="youtube" value="1" style="width:auto" {{ 'checked' if f.youtube }}> Allows YouTube</label>
-<label style="margin:0"><input type="checkbox" name="hide_application" value="1" style="width:auto" {{ 'checked' if f.hide_application }}> Hide "apply first"</label>
-<button>Filter</button>
-</div></form>
-<div class="row" style="align-items:center;margin:0 0 1rem">
-<form method="post" action="/discover/refresh"><button class="ghost">Refresh now</button></form>
-<span class="mute">{{ rows|length }} shown of {{ total }} open. Last refreshed {{ refreshed or 'never' }} (UTC); it refreshes itself every 3 hours.</span>
-</div>
-{% if not rows %}<div class="card mute">Nothing matches. Loosen a filter, or press Refresh now.</div>{% endif %}
-{% for d in rows %}
+{% if not rows %}<div class="card mute">Nothing matches. Loosen a filter, or press Refresh now.</div>{% else %}
 <div class="card">
-<div style="display:flex;justify-content:space-between;gap:.8rem;flex-wrap:wrap">
-<div><strong>{{ d.title }}</strong><div class="mute">{{ d.brand }} &middot; {{ d.source }}{% if d.category %} &middot; {{ d.category }}{% endif %}</div></div>
-<div style="text-align:right"><div class="big">{% if d.rate_max %}${{ '%g'|format(d.rate_max) }}<span class="mute" style="font-size:.9rem">/1K</span>{% else %}-{% endif %}</div>
-<div class="mute">{{ '$%s left'|format('{:,.0f}'.format(d.budget_left)) if d.budget_left is not none else '' }}</div></div>
-</div>
-<div class="row">
+{% for d in rows %}<div class="item" style="align-items:flex-start">
+{% if d.image %}<img class="thumb wide" src="{{ d.image }}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'">{% else %}<div class="thumb wide"></div>{% endif %}
+<div class="grow"><div class="title">{{ d.title }}</div>
+<div class="mute">{{ d.brand }}, {{ d.source }}{% if d.category %}, {{ d.category }}{% endif %}</div>
+<div class="row" style="margin-top:.4rem">
 {% for p in d.platforms %}<span class="tag">{{ p }}</span>{% endfor %}
 {% if d.gaming %}<span class="tag ok">gaming</span>{% endif %}
 {% if d.requires_application %}<span class="tag warn">apply first</span>{% endif %}
@@ -45,12 +46,15 @@
 {% if d.state != 'new' %}<span class="tag">{{ d.state }}</span>{% endif %}
 </div>
 <div class="row">
-{% if d.state == 'joined' and d.campaign_id %}<a class="btn good" href="/campaigns/{{ d.campaign_id }}">Open campaign</a>
+{% if d.state == 'joined' and d.campaign_id %}<a class="btn small" href="/campaigns/{{ d.campaign_id }}">Open campaign</a>
 {% else %}
-<a class="btn" href="/discover/{{ d.id }}">Join</a>
-<form method="post" action="/discover/{{ d.id }}/state"><input type="hidden" name="state" value="{{ 'new' if d.state == 'watching' else 'watching' }}"><button class="ghost">{{ 'Unwatch' if d.state == 'watching' else 'Watch' }}</button></form>
-<form method="post" action="/discover/{{ d.id }}/state"><input type="hidden" name="state" value="{{ 'new' if d.state == 'hidden' else 'hidden' }}"><button class="ghost">{{ 'Unhide' if d.state == 'hidden' else 'Hide' }}</button></form>
+<a class="btn small" href="/discover/{{ d.id }}">Join</a>
+<form method="post" action="/discover/{{ d.id }}/state"><input type="hidden" name="state" value="{{ 'new' if d.state == 'watching' else 'watching' }}"><button class="ghost small">{{ 'Unwatch' if d.state == 'watching' else 'Watch' }}</button></form>
+<form method="post" action="/discover/{{ d.id }}/state"><input type="hidden" name="state" value="{{ 'new' if d.state == 'hidden' else 'hidden' }}"><button class="ghost small">{{ 'Unhide' if d.state == 'hidden' else 'Hide' }}</button></form>
 {% endif %}
 </div></div>
-{% endfor %}
+<div class="num"><div class="big" style="font-size:1.25rem">{% if d.rate_max %}${{ '%g'|format(d.rate_max) }}<span class="mute" style="font-size:.85rem;font-weight:400"> per 1K</span>{% else %}-{% endif %}</div>
+<div class="mute">{{ '$%s left'|format('{:,.0f}'.format(d.budget_left)) if d.budget_left is not none else '' }}</div></div>
+</div>{% endfor %}
+</div>{% endif %}
 {% endblock %}

@@ -1,6 +1,6 @@
 # Verification of the PRD's `VERIFY` items
 
-Checked 12 Nov 2026 from a cloud session, re-checked the same evening on the laptop. These are facts checked against the vendors' own pages; re-check them before relying on them.
+Checked 12 Nov 2026 from a cloud session, re-checked the same evening on the laptop. Where this file and `CLIPFORGE_PRD.md` differ, this file wins.
 
 > **Read this first.** Item 1 — the fact the whole publishing design was built on — **is no longer true.** YouTube removed the restriction on 2 November 2026, ten days before this document was written. Direct upload from our own project is now possible and Buffer may not be needed at all. See "The big change" below. Nothing has been rebuilt yet: this is a Phase 5 decision and Yaish's call.
 

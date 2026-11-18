@@ -1,13 +1,24 @@
 {% extends "base.html" %}{% block body %}
 <h1>Campaigns</h1>
-{% if not rows %}<div class="card mute">No campaigns saved.</div>{% else %}
-<div class="card scroll"><table>
-<tr><th>Campaign</th><th>Status</th><th>Rate</th><th>Budget left</th><th>Deadline</th><th>Views</th><th>Earned (est.)</th><th>Approval</th></tr>
-{% for k in rows %}<tr><td><a href="/campaigns/{{ k.id }}" style="color:var(--accent)">{{ k.name }}</a><div class="mute">{{ k.platform }}</div></td><td>{{ k.status }}</td>
-<td>{{ '$%.2f/1K'|format(k.rate_per_1k) if k.rate_per_1k else '-' }}</td>
-<td>{{ '$%.0f'|format(k.budget_left) if k.budget_left is not none else '-' }}</td>
-<td>{{ k.deadline or '-' }}</td><td>{{ '{:,}'.format(k.views) }}</td><td>${{ '%.2f'|format(k.earned) }}</td>
-<td>{{ '%.0f%%'|format(k.approval * 100) if k.approval is not none else '-' }}</td></tr>{% endfor %}
-</table></div>{% endif %}
+{% if not rows %}<div class="card mute">No campaigns yet. Find one to join.</div>{% else %}
+<div class="card">
+{% for k in rows %}{% set n = k.counts %}<div class="item">
+{% if k.image %}<img class="thumb wide" src="{{ k.image }}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'">{% else %}<div class="thumb wide"></div>{% endif %}
+<div class="grow"><div class="title"><a href="/campaigns/{{ k.id }}">{{ k.name }}</a></div>
+<div class="mute">{{ k.platform }}{% if k.rate_per_1k %}, ${{ '%.2f'|format(k.rate_per_1k) }} per 1K{% endif %}{% if k.budget_left is not none %}, ${{ '{:,.0f}'.format(k.budget_left) }} left{% endif %}{% if k.budget and k.budget.per_day %}, about ${{ '{:,.0f}'.format(k.budget.per_day) }} a day going out{% endif %}{% if k.deadline %}, ends {{ k.deadline }}{% endif %}</div>
+<div class="row" style="margin-top:.4rem"><span class="tag {{ 'ok' if k.status == 'active' else '' }}">{{ 'left' if k.status == 'skipped' else k.status }}</span>
+{% if n.posted %}<div class="stack" title="{{ n.approved }} approved, {{ n.pending }} awaiting review, {{ n.rejected }} rejected">
+{% if n.approved %}<i class="a" style="flex:{{ n.approved }}"></i>{% endif %}{% if n.pending %}<i class="p" style="flex:{{ n.pending }}"></i>{% endif %}{% if n.rejected %}<i class="r" style="flex:{{ n.rejected }}"></i>{% endif %}</div>
+<span class="mute">{{ n.posted }} posted, {{ n.submitted }} submitted, {{ n.approved }} approved, {{ n.rejected }} rejected</span>
+{% else %}<span class="mute">Nothing posted yet</span>{% endif %}
+{% if k.geo %}<span class="tag {{ 'ok' if k.geo.tier1 >= 0.3 else '' }}" title="{% for g in k.geo.top %}{{ g.country }} {{ g.pct }}%{{ ', ' if not loop.last }}{% endfor %}">Tier 1: {{ '%.0f'|format(k.geo.tier1 * 100) }}%</span>{% endif %}
+{% if k.quota %}<span class="tag">brief wants {{ '%.0f'|format(k.quota * 100) }}% Tier 1</span>{% endif %}
+{% if k.budget and k.budget.warn and k.status == 'active' %}<span class="tag warn">{{ k.budget.warn }}</span>{% endif %}</div></div>
+<div class="num"><div class="big" style="font-size:1.15rem">{{ '{:,}'.format(k.views) }}</div><div class="mute">views</div></div>
+<div class="num hide-s"><div>${{ '%.2f'|format(k.earned) }}</div><div class="mute">earned (est.)</div></div>
+<div>{% if k.status == 'active' %}<form method="post" action="/campaigns/{{ k.id }}/hold" onsubmit="return confirm('Leave this campaign? Autopilot stops sourcing and clipping it, and it drops out of the posting queue.')"><button class="ghost small">Leave</button></form>
+{% elif k.status == 'skipped' and k.joined_at %}<form method="post" action="/campaigns/{{ k.id }}/resume"><button class="ghost small">Rejoin</button></form>{% endif %}</div>
+</div>{% endfor %}
+</div>{% endif %}
 <a class="btn" href="/discover">Find campaigns</a>
 {% endblock %}

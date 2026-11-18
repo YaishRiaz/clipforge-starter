@@ -109,6 +109,14 @@ def fetch(url: str, dest_dir: Path, settings: Settings, *,
     Raises TooLong before spending any bandwidth when the video is over the cap,
     unless Yaish has already approved this source's length.
     """
+    from . import kick
+
+    if kick.is_kick(url):
+        try:
+            return kick.fetch(url, dest_dir, settings, audio_only=audio_only, allow_long=allow_long,
+                              beat=beat)
+        except kick.KickError as exc:
+            raise DownloadError(str(exc)) from None
     dest_dir.mkdir(parents=True, exist_ok=True)
     info = metadata(url)
 

@@ -82,6 +82,100 @@ def send(settings: Settings, text: str, buttons: list[list[tuple[str, str]]] | N
     call(settings, "sendMessage", **params)
 
 
+def send_file(settings: Settings, path: Path, caption: str = "") -> None:
+    with path.open("rb") as fh:
+        call(settings, "sendDocument", files={"document": (path.name, fh, "text/markdown")},
+             chat_id=settings.telegram_chat_id, caption=caption[:1000])
+
+
+def _book_buttons(name: str) -> list[list[tuple[str, str]]]:
+    return [[("Read", f"tv:{name}"), ("Approve", f"ta:{name}"), ("Reject", f"tr:{name}")]]
+
+
+def _rubric_text(settings: Settings, name: str) -> str:
+    """The rubric draft in plain words: which kinds of moment its top Shorts favour."""
+    import json
+
+    p = settings.rubrics_dir / f"{name}.draft.json"
+    if not p.is_file():
+        p = settings.rubrics_dir / f"{name}.json"
+    if not p.is_file():
+        return f"No rubric for {name}: the book alone changes the edit."
+    data = json.loads(p.read_text(encoding="utf-8"))
+    cats = sorted(data.get("categories", []), key=lambda c: -c["weight"])
+    ev = data.get("evidence", {})
+    lines = [f"Rubric for {name}: what scores higher when picking moments"]
+    for c in cats[:8]:
+        e = ev.get(c["id"])
+        seen = f" ({e['n']} top Shorts, median {e['median_views']:,} views)" if e else " (unchanged)"
+        lines.append(f"{c['weight']:.2f}  {c['id'].replace('_', ' ')}{seen}")
+    return "\n".join(lines)
+
+
+def announce_book(settings: Settings, name: str) -> None:
+    import json
+
+    from ..taste import book as book_mod
+    from ..taste import build as build_mod
+
+    path = book_mod.draft_path(name)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    has_rubric = (settings.rubrics_dir / f"{name}.draft.json").is_file()
+    text = (build_mod.summary(name, data).split(". Read tastebook")[0] + "."
+            + (" A rubric draft comes with it." if has_rubric else "")
+            + "\n\nRead it, then approve or reject. Nothing changes until you approve.")
+    send(settings, text, _book_buttons(name))
+
+
+def _sweep_books(conn: sqlite3.Connection, settings: Settings) -> int:
+    from ..taste import book as book_mod
+
+    sent = 0
+    for b in book_mod.listing():
+        key = f"tg_book_{b['name']}_{int(b['path'].stat().st_mtime)}"
+        if b["status"] != "draft" or db.kv_get(conn, key):
+            continue
+        announce_book(settings, b["name"])
+        db.kv_set(conn, key, "1")
+        sent += 1
+    return sent
+
+
+def _book_action(conn: sqlite3.Connection, settings: Settings, action: str, name: str) -> str:
+    from ..taste import book as book_mod
+
+    if action == "tv":
+        b = next((x for x in book_mod.listing() if x["name"] == name), None)
+        if b is None:
+            return f"No taste book called {name}."
+        if b["md"]:
+            send_file(settings, b["md"], f"Taste book {name} ({b['status']})")
+        send(settings, _rubric_text(settings, name),
+             _book_buttons(name) if b["status"] == "draft" else None)
+        return f"Sent {name}"
+    if action == "ta":
+        live = book_mod.approve_with_rubric(name, settings.rubrics_dir)
+        return f"{name} approved: " + " and ".join(live) + " now live; new clips use it."
+    book_mod.set_aside(name, settings.rubrics_dir)
+    return f"{name} rejected and set aside; it is not used and will not be rebuilt on its own."
+
+
+def _books_text() -> tuple[str, list[list[tuple[str, str]]]]:
+    from ..taste import book as book_mod
+
+    items = book_mod.listing()
+    if not items:
+        return "No taste books yet.", []
+    lines, buttons = ["Taste books (live ones are used for new clips):"], []
+    for b in items:
+        lines.append(f"- {b['name']}: {b['status']}")
+        if b["status"] == "draft":
+            buttons += _book_buttons(b["name"])
+        else:
+            buttons.append([(f"Read {b['name']}", f"tv:{b['name']}")])
+    return "\n".join(lines), buttons[:30]
+
+
 def clip_caption(row: sqlite3.Row) -> str:
     meta = review.meta_of(row)
     lines = [f"Clip {row['id']}  score {row['score']:.0f}", meta.get("title", ""), "",
@@ -125,7 +219,7 @@ def sweep(conn: sqlite3.Connection, settings: Settings) -> int:
             send_manual(settings, review.get(conn, j["ref_id"]))
         db.kv_set(conn, key, "1")
         sent += 1
-    return sent + _sweep_posts(conn, settings)
+    return sent + _sweep_posts(conn, settings) + _sweep_books(conn, settings)
 
 
 def send_manual(settings: Settings, row: sqlite3.Row | None) -> None:
@@ -230,6 +324,14 @@ def _status_text(conn: sqlite3.Connection, settings: Settings) -> str:
     return (f"Clips: {n or 'none'}\nJobs: {q or 'none'}\nDashboard: {lan_address(settings)}")
 
 
+def _ack(settings: Settings, cb: dict, text: str) -> None:
+    """Stop the button's spinner. A late or failed acknowledgement never stops the action."""
+    try:
+        call(settings, "answerCallbackQuery", callback_query_id=cb["id"], text=text[:190])
+    except TelegramError as exc:
+        log.info("button acknowledgement skipped: %s", exc)
+
+
 def handle(conn: sqlite3.Connection, settings: Settings, update: dict) -> None:
     cb = update.get("callback_query")
     msg = update.get("message")
@@ -238,6 +340,24 @@ def handle(conn: sqlite3.Connection, settings: Settings, update: dict) -> None:
         return                                  # not Yaish: ignore silently
     if cb:
         action, _, raw = (cb.get("data") or "").partition(":")
+        if action in ("tv", "ta", "tr"):
+            # Acknowledge first: Telegram only accepts an answer for a short while, and a press
+            # read late (after a restart) must still do what was asked.
+            _ack(settings, cb, {"tv": "Sending it", "ta": "Approving", "tr": "Setting it aside"}[action])
+            try:
+                answer = _book_action(conn, settings, action, raw)
+            except (FileNotFoundError, ValueError, OSError, TelegramError) as exc:
+                answer = f"{raw}: {str(exc)[:190]}"
+                send(settings, answer)
+                return
+            if action != "tv":
+                try:
+                    call(settings, "editMessageReplyMarkup", chat_id=settings.telegram_chat_id,
+                         message_id=cb["message"]["message_id"], reply_markup='{"inline_keyboard":[]}')
+                except TelegramError:
+                    pass
+                send(settings, answer)
+            return
         try:
             clip_id = int(raw)
             if action == "a":
@@ -253,7 +373,7 @@ def handle(conn: sqlite3.Connection, settings: Settings, update: dict) -> None:
                 return
         except (ValueError, review.ReviewError) as exc:
             answer = str(exc)[:190]
-        call(settings, "answerCallbackQuery", callback_query_id=cb["id"], text=answer)
+        _ack(settings, cb, answer)
         try:
             call(settings, "editMessageReplyMarkup", chat_id=settings.telegram_chat_id,
                  message_id=cb["message"]["message_id"], reply_markup='{"inline_keyboard":[]}')
@@ -274,9 +394,13 @@ def handle(conn: sqlite3.Connection, settings: Settings, update: dict) -> None:
             send_clip(settings, review.get(conn, r["id"]))
     elif text.startswith("/status"):
         send(settings, _status_text(conn, settings))
+    elif text.startswith("/books"):
+        body, buttons = _books_text()
+        send(settings, body, buttons or None)
     else:
-        send(settings, "Commands: /ready (clips to review), /status. Reply to a clip with what to "
-             "fix (for example \"cut the last 3 seconds\") and it is remade.")
+        send(settings, "Commands: /ready (clips to review), /books (taste books: read, approve, "
+             "reject), /status. Reply to a clip with what to fix (for example \"cut the last 3 "
+             "seconds\") and it is remade.")
 
 
 def poll_once(conn: sqlite3.Connection, settings: Settings, *, wait: int = 20) -> int:

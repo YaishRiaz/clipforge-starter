@@ -1,0 +1,19 @@
+{
+  "name": "minecraft",
+  "version": 1,
+  "note": "Starting weights: `general`'s set plus two action categories for SMP/hardcore-style content (near_death_escape, pvp_or_mob_fight). No Minecraft-specific view data yet; split into its own file so it re-weights only from Minecraft campaigns' own posts. Re-weighted from our own clips' view counts once there are enough (PRD section 6).",
+  "categories": [
+    {"id": "near_death_escape", "weight": 1.1, "description": "A close call where the player nearly dies or loses everything, and survives or doesn't."},
+    {"id": "pvp_or_mob_fight", "weight": 1.0, "description": "A fight against another player or a mob, with the outcome visible."},
+    {"id": "setup_payoff", "weight": 1.0, "description": "A clear setup followed by a payoff inside the clip."},
+    {"id": "surprise", "weight": 1.0, "description": "Something unexpected happens that the viewer could not predict."},
+    {"id": "big_reaction", "weight": 0.9, "description": "A loud or visible reaction: shouting, laughter, shock."},
+    {"id": "quotable_line", "weight": 0.8, "description": "One line people would repeat or comment."},
+    {"id": "stakes_early", "weight": 1.1, "description": "What is at risk is stated in the first three seconds."}
+  ],
+  "penalties": [
+    {"id": "needs_context", "weight": -1.0, "description": "Makes no sense without the rest of the stream, or depends on a long running storyline."},
+    {"id": "slow_start", "weight": -0.8, "description": "Nothing happens in the first three seconds."},
+    {"id": "no_payoff", "weight": -1.0, "description": "Ends before the moment resolves."}
+  ]
+}

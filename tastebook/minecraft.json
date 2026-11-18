@@ -1,0 +1,21 @@
+{
+  "niche": "minecraft",
+  "status": "active",
+  "source": "prior",
+  "evidence": [],
+  "notes": "Starting prior for Minecraft clips: slightly calmer punch-ins than GTA.",
+  "style": {
+    "captions": {
+      "words_per_event": 2,
+      "highlight": "#FFE000",
+      "pop": true
+    },
+    "zoom": {
+      "enabled": true,
+      "scale": 1.1,
+      "seconds": 0.8,
+      "max_events": 3,
+      "min_gap": 5.0
+    }
+  }
+}

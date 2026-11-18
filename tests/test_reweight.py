@@ -29,8 +29,8 @@ def env(tmp_path, monkeypatch):
     get_settings.cache_clear()
     settings = get_settings()
     conn = db.open_db(settings.db_path)
-    conn.execute("INSERT INTO campaigns (id, platform, name, status, joined_at) "
-                 "VALUES (1,'whop','C','active',datetime('now'))")
+    conn.execute("INSERT INTO campaigns (id, platform, name, category, status, joined_at) "
+                 "VALUES (1,'whop','C','gta','active',datetime('now'))")
     conn.execute("INSERT INTO sources (id, campaign_id, url) VALUES (1,1,'u')")
     rubric_mod.for_campaign.cache_clear()
     yield settings, conn
@@ -132,9 +132,33 @@ def test_learn_page_and_apply(env):
         post(conn, "police_chase", 10_000)
         post(conn, "big_reaction", 100)
     assert "Apply proposed weights" in c.get("/learn").text
-    r = c.post("/learn/apply", headers={"origin": "http://testserver"})
+    r = c.post("/learn/gta/apply", headers={"origin": "http://testserver"})
     assert r.status_code == 303
     assert gta(settings).version == 3
+
+
+def test_learn_page_keeps_each_niches_evidence_apart(env):
+    settings, conn = env
+    conn.execute("INSERT INTO campaigns (id, platform, name, category, status, joined_at) "
+                 "VALUES (2,'whop','G','general','active',datetime('now'))")
+    conn.execute("INSERT INTO sources (id, campaign_id, url) VALUES (2,2,'u2')")
+    for _ in range(5):
+        post(conn, "police_chase", 10_000)           # gta campaign (source 1)
+
+    def post2(cat, views):
+        mid = conn.execute('INSERT INTO moments (source_id, start, "end", score, rubric_category) '
+                           "VALUES (2,0,30,50,?)", (cat,)).lastrowid
+        cid = conn.execute("INSERT INTO clips (moment_id, status) VALUES (?, 'posted')", (mid,)).lastrowid
+        pid = conn.execute("INSERT INTO posts (clip_id, posted_at) VALUES (?, datetime('now', '-100 hours'))",
+                           (cid,)).lastrowid
+        conn.execute("INSERT INTO stats (post_id, views) VALUES (?, ?)", (pid, views))
+
+    for _ in range(5):
+        post2("surprise", 5)                          # general campaign, a different category
+    gta_views = reweight.own_views(conn, niche="gta", rubrics_dir=settings.rubrics_dir)
+    general_views = reweight.own_views(conn, niche="general", rubrics_dir=settings.rubrics_dir)
+    assert gta_views.get("police_chase") == [10_000] * 5 and "surprise" not in gta_views
+    assert general_views.get("surprise") == [5] * 5 and "police_chase" not in general_views
 
 
 def test_campaign_hold_and_resume(env, capsys):

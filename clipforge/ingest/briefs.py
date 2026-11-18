@@ -48,6 +48,9 @@ is something to add, the other something to avoid.
 min_views is the view count below which a clip earns nothing; briefs state it in many \
 shapes ("clips under 2,000 views do not earn", "minimum 2k views to qualify", "must reach \
 2,000 views"). Record the number. Do the same for rate_per_1k and clip_cap_usd.
+- required_names_any: when captions or on-screen text must mention at least one of several names, list the names.
+- required_caption: when the brief gives caption text every post must carry exactly, put just that text here.
+- min_tier1_share and audience_requirements: briefs often demand that views come from certain countries ("minimum 30% Tier 1 audience", "US/UK/CA views only", "views from non-Tier-1 countries are not paid"). Record the share as a number between 0 and 1 when one is given, and the requirement in the brief's words either way. country_restrictions is for where the CLIPPER may live; do not mix the two.
 - uncertain: list every field where the brief is ambiguous, self-contradictory, or where you \
 had to make a judgement call. Say what is unclear. This list is read by a human, so an \
 honest "clip length stated as 'short' with no number" is worth more than a guess.
@@ -174,6 +177,12 @@ def parse_brief(
     # whatever it returned is dropped and his earlier choice survives a re-parse.
     before = load_rules(conn, campaign_id)
     rules.approved_channels = list(before.approved_channels) if before else []
+    rules.source_windows = list(before.source_windows) if before else []      # entered by hand too
+    if before:                    # dates and games checked by hand win over a re-parse that drops them
+        rules.footage_after = rules.footage_after or before.footage_after
+        rules.footage_games = rules.footage_games or list(before.footage_games)
+        rules.post_from = rules.post_from or before.post_from
+        rules.paid_promotion = rules.paid_promotion or before.paid_promotion
     for note in audit_against_brief(rules, text):
         if note not in rules.uncertain:
             rules.uncertain.append(note)
@@ -190,6 +199,20 @@ def save_rules(conn: sqlite3.Connection, campaign_id: int, rules: BriefRules) ->
         "UPDATE campaigns SET rules_json=? WHERE id=?",
         (rules.model_dump_json(), campaign_id),
     )
+
+
+def set_window(conn: sqlite3.Connection, campaign_id: int, url: str, start: float,
+               end: float | None = None) -> None:
+    """Limit one video of the campaign to [start, end], replacing any earlier limit on it."""
+    from .rules import SourceWindow, normalize_url
+
+    rules = load_rules(conn, campaign_id)
+    if rules is None:
+        return
+    target = normalize_url(url)
+    rules.source_windows = [w for w in rules.source_windows if normalize_url(w.url) != target]
+    rules.source_windows.append(SourceWindow(url=target, start=round(max(0.0, start), 1), end=end))
+    save_rules(conn, campaign_id, rules)
 
 
 def load_rules(conn: sqlite3.Connection, campaign_id: int) -> BriefRules | None:

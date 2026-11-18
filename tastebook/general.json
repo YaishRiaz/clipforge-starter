@@ -1,0 +1,13 @@
+{
+  "niche": "general",
+  "status": "active",
+  "source": "prior",
+  "evidence": [],
+  "notes": "Starting prior, not yet measured from reference Shorts. Plain two-word captions with the spoken word highlighted; no zoom.",
+  "style": {
+    "captions": {
+      "words_per_event": 2,
+      "highlight": "#FFE000"
+    }
+  }
+}

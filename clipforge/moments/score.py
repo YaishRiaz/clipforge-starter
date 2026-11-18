@@ -42,7 +42,11 @@ For each moment you propose:
 word of the sentence that sets the moment up, not mid-sentence (skip a filler opener such as \"um\" or \"so okay\" and start where the point begins), and end on the payoff, \
 not after it has fizzled out. The payoff is the outcome the viewer is waiting for: if the \
 streamer makes a bet, an attempt, a threat or a prediction, the moment must run through \
-the result and the immediate reaction to it, never stop at the announcement.
+the result and the immediate reaction to it, never stop at the announcement. A stranger \
+who has never seen the stream must understand the situation from the clip alone: start \
+early enough to show who is chasing whom, what the goal is or what was just said, rather \
+than in the middle of the action. If the setup is not in the transcript, flag the \
+needs-context penalty instead of starting cold.
 - description: one line on what actually happens.
 - hook: the words to burn on the first frame. Under 60 characters, it must make a \
 stranger stay, and it must be true to the clip. Not a question unless the clip answers \
@@ -179,6 +183,7 @@ def propose(
             if window[0] <= peak.start <= window[1]:
                 reasons.setdefault(window, []).append(
                     f"{peak.signal} {peak.z:.1f} sd above normal at {peak.start:.0f}s"
+                    + (f" ({peak.note})" if peak.note else "")
                 )
                 break
 

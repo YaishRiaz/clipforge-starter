@@ -103,9 +103,11 @@ def fetch_shorts(settings: Settings, *, queries=QUERIES, days: int = 365) -> lis
     return out[:KEEP]
 
 
-def cluster(shorts: list[dict], current: rb.Rubric, settings: Settings) -> Clusters:
+def cluster(shorts: list[dict], current: rb.Rubric, settings: Settings, *,
+            subject: str = "GTA") -> Clusters:
     known = [c for c in current.categories if c.id not in STRUCTURAL]
-    system = ("You sort titles of GTA Shorts into moment types. Use only the type ids given, or "
+    system = (f"You sort titles of {subject} Shorts into moment types. "
+              "Use only the type ids given, or "
               "'other'. You may propose at most 3 new types (snake_case id plus one-line "
               "description) if many titles share a type that none of the given ones covers; "
               "then assign to them too. Assign each title once, by its index.")
@@ -132,7 +134,7 @@ def weights(shorts: list[dict], clusters: Clusters, current: rb.Rubric) -> dict[
 
 
 def assemble(current: rb.Rubric, derived: dict[str, dict], clusters: Clusters, *,
-             sample: int, today: str) -> dict:
+             sample: int, today: str, subject: str = "GTA", name: str | None = None) -> dict:
     new_desc = {t.id: t.description for t in clusters.new_types}
     cats = []
     for c in current.categories:
@@ -143,8 +145,8 @@ def assemble(current: rb.Rubric, derived: dict[str, dict], clusters: Clusters, *
         if ident not in current.category_ids:
             cats.append({"id": ident, "weight": d["weight"], "description": new_desc.get(ident, "")})
     return {
-        "name": current.name, "version": current.version + 1,
-        "note": (f"Weights for types seen in titles come from median views of {sample} top GTA "
+        "name": name or current.name, "version": current.version + 1 if name is None else 1,
+        "note": (f"Weights for types seen in titles come from median views of {sample} top {subject} "
                  f"Shorts (YouTube Data API, {today}); a type with fewer than {MIN_MEMBERS} "
                  "matches keeps its earlier weight, and setup_payoff/stakes_early are hand-set. "
                  "Views favour big channels, so treat this as a prior and re-weight from our "
@@ -157,17 +159,20 @@ def assemble(current: rb.Rubric, derived: dict[str, dict], clusters: Clusters, *
     }
 
 
-def build(path: Path, settings: Settings, *, write: bool = True) -> dict:
-    current = rb.load(path)
-    shorts = fetch_shorts(settings)
+def build(path: Path, settings: Settings, *, write: bool = True, queries=QUERIES,
+          subject: str = "GTA", base: Path | None = None, name: str | None = None) -> dict:
+    """Re-weight `base` (default: `path` itself) from top Shorts and write it to `path`."""
+    current = rb.load(base or path)
+    shorts = fetch_shorts(settings, queries=queries)
     if len(shorts) < 30:
         raise BuildError(f"only {len(shorts)} usable Shorts found; not enough to derive weights")
-    clusters = cluster(shorts, current, settings)
+    clusters = cluster(shorts, current, settings, subject=subject)
     derived = weights(shorts, clusters, current)
     if not derived:
         raise BuildError("no moment type had enough matching titles")
     out = assemble(current, derived, clusters, sample=len(shorts),
-                   today=datetime.now(timezone.utc).strftime("%d %b %Y"))
+                   today=datetime.now(timezone.utc).strftime("%d %b %Y"), subject=subject,
+                   name=name)
     if write:
         Path(path).write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
         rb.for_campaign.cache_clear()

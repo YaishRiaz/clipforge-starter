@@ -27,6 +27,14 @@ _YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be",
              "www.youtu.be", "music.youtube.com"}
 
 
+class SourceWindow(LLMModel):
+    """A stretch of an approved video that the brief limits clipping to."""
+
+    url: str
+    start: float = 0.0
+    end: float | None = Field(None, description="Seconds; null means to the end of the video.")
+
+
 class BriefRules(LLMModel):
     """Everything the pipeline needs to obey one campaign's brief."""
 
@@ -63,6 +71,17 @@ class BriefRules(LLMModel):
     disclosure_text: str | None = Field(
         None, description="Exact wording the brief requires in the description, if any.")
     caption_requirements: str | None = None
+    required_names_any: list[str] = Field(
+        default_factory=list,
+        description="Names of which the caption or on-screen text must mention at least one, "
+                    "e.g. 'must mention Sypher, Maddynf or Replays'. Empty if the brief has no such rule.")
+    source_windows: list[SourceWindow] = Field(
+        default_factory=list,
+        description="Leave empty. Time limits on approved videos are entered by hand, never guessed.")
+    required_caption: str | None = Field(
+        None, description="A caption the brief says every post must carry word for word, e.g. the "
+                          "quoted text in 'Use the required caption: \"Jake Paul On YouTube\"'. "
+                          "Just that text, no quotes. Null if the brief gives none.")
     min_creator_frame_share: float | None = Field(
         None, description="Smallest share of the frame that must show the creator, 0 to 1.")
     required_overlay: str | None = Field(
@@ -85,12 +104,31 @@ class BriefRules(LLMModel):
     banned_content: list[str] = Field(default_factory=list)
     banned_edits: list[str] = Field(default_factory=list)
 
+    # --- when footage counts, for briefs that approve one day's stream of a channel ---
+    footage_after: str | None = Field(
+        None,
+        description="ISO date-time (UTC) when eligible footage starts, if the brief names a "
+                    "date or event ('only the November 19 stream'). Footage recorded before "
+                    "it is never clipped. Null if the brief has no such limit.")
+    footage_games: list[str] = Field(
+        default_factory=list,
+        description="Games the footage must show, if the brief limits it ('GTA 6 moments "
+                    "only'), as the streaming site names them. Empty means any.")
+
     # --- posting workflow ---
     pre_approval: bool = Field(
         False,
         description="True when the brief requires the campaign team to approve a draft "
                     "before it is posted. Those clips are held, never auto-posted.",
     )
+    post_from: str | None = Field(
+        None,
+        description="ISO date-time (UTC) before which nothing may be posted, when the brief "
+                    "says the campaign opens later ('submissions begin when it opens').")
+    paid_promotion: bool = Field(
+        False,
+        description="True when the brief asks to disclose paid content through the "
+                    "platform's own paid-promotion setting.")
 
     # --- money, as the brief states it; Yaish confirms against the campaign page ---
     rate_per_1k: float | None = None
@@ -99,6 +137,16 @@ class BriefRules(LLMModel):
     country_restrictions: list[str] = Field(
         default_factory=list, description="Countries the brief names as eligible or excluded.")
     deadline: str | None = Field(None, description="ISO date if the brief states one.")
+    min_tier1_share: float | None = Field(
+        None,
+        description="Smallest share of a clip's VIEWERS that must come from the countries "
+                    "the brief calls Tier 1 (or names, e.g. US/UK/CA/AU), as 0 to 1: "
+                    "'at least 30% Tier 1 audience' is 0.3. Null if the brief has no "
+                    "such number. This is about viewers, not where the clipper lives.")
+    audience_requirements: str | None = Field(
+        None,
+        description="Any requirement about who watches (countries, tiers, language, real "
+                    "engagement), in the brief's own words. Null if the brief has none.")
 
     # --- parser honesty ---
     uncertain: list[str] = Field(
@@ -139,6 +187,18 @@ class BriefRules(LLMModel):
                 return True
         return False
 
+    def window_for(self, url: str | None) -> tuple[float, float | None] | None:
+        """The (start, end) the brief limits this video to, or None when the whole video is approved."""
+        target = normalize_url(url or "")
+        for w in self.source_windows:
+            if normalize_url(w.url) == target:
+                return w.start, w.end
+        return None
+
+    def inside_window(self, url: str | None, start: float, end: float) -> bool:
+        win = self.window_for(url)
+        return win is None or (start >= win[0] and (win[1] is None or end <= win[1]))
+
     def approves_channel(self, channel_url: str) -> bool:
         """Has Yaish approved everything on this channel for the campaign?"""
         target = channel_root(channel_url)
@@ -150,6 +210,19 @@ class BriefRules(LLMModel):
         if self.clip_max_seconds is not None and seconds > self.clip_max_seconds:
             return False, f"clip is {seconds:.1f}s, brief allows at most {self.clip_max_seconds}s"
         return True, ""
+
+    def footage_ok(self, at: float | None, games=()) -> tuple[bool, str]:
+        """May footage recorded at `at` (epoch seconds), showing `games`, be clipped?"""
+        if self.footage_after and at is not None and at < _epoch(self.footage_after):
+            return False, f"recorded before {self.footage_after}, when the brief's footage starts"
+        if self.footage_games and games is not None:
+            wanted = {_game(g) for g in self.footage_games}
+            if not any(_game(g) in wanted for g in games):
+                return False, f"shows {', '.join(games) or 'no game'}, not {', '.join(self.footage_games)}"
+        return True, ""
+
+    def may_post(self, now: float) -> bool:
+        return not self.post_from or now >= _epoch(self.post_from)
 
     def allows_platform(self, platform: str) -> bool:
         """An empty list means the brief did not say; the campaign page decides."""
@@ -177,11 +250,28 @@ def youtube_id(url: str) -> str | None:
     return candidate if re.fullmatch(r"[A-Za-z0-9_-]{11}", candidate or "") else None
 
 
+def _epoch(iso: str) -> float:
+    from datetime import datetime, timezone
+
+    dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp()
+
+
+_GAME_ALIASES = {"gta6": "grandtheftautovi", "gtavi": "grandtheftautovi", "gta5": "grandtheftautov",
+                 "gtav": "grandtheftautov"}
+
+
+def _game(name: str) -> str:
+    """One spelling per game: 'GTA 6', 'GTA VI' and 'Grand Theft Auto VI' are the same."""
+    key = re.sub(r"[^a-z0-9]", "", (name or "").lower())
+    return _GAME_ALIASES.get(key, key)
+
+
 def channel_root(url: str) -> str:
     """A channel link without a /videos, /clips or /streams tail, normalized."""
     base = normalize_url(url)
     root = re.sub(r"/(videos|clips|streams|about|schedule|featured)$", "", base)
-    return root.lower() if "twitch.tv/" in root else root      # Twitch names ignore case
+    return root.lower() if ("twitch.tv/" in root or "kick.com/" in root) else root   # names ignore case
 
 
 def normalize_url(url: str) -> str:
