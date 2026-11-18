@@ -43,6 +43,16 @@ The tests need `ffmpeg` and `ffprobe` on PATH. They need no API keys and no netw
 - Keep modules focused. A new footage source belongs in `clipforge/ingest/`, a new layout or overlay in `clipforge/edit/`.
 - Tests go in `tests/test_<area>.py`, named for the behaviour (`test_a_brief_that_bans_graphics_turns_emoji_off`).
 
+## How changes get in
+
+`main` is protected, so nobody can change the code there directly:
+
+1. Fork the repository, make a branch, and open a pull request against `main`.
+2. On a first contribution, a maintainer approves the CI run before the tests start.
+3. CI must pass on Python 3.11 and 3.13, and the branch must be up to date with `main`.
+4. The code owner (see `.github/CODEOWNERS`) must approve the pull request. A new push after approval needs a fresh approval, and every review conversation must be resolved.
+5. The maintainer squash-merges it. Force-pushes to `main` and deleting `main` are blocked.
+
 ## Pull requests
 
 - One topic per PR. Explain what changes for the operator, and how you tested it.
